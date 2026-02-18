@@ -1,24 +1,36 @@
+import json
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.views import LoginView, LogoutView
-import json
-
-from django.db.models import Q
+from django.db.models import Avg, Max, Sum
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views import View
 
 from accounts.forms import OrganizationForm, UserCreateForm, UserUpdateForm
 from accounts.models import Organization
+from agents.models import Agent, Incident, LogEntry, MetricPoint, ProcessSample
 from audit.models import AuditLog
 from audit.utils import create_audit_log
-from .demo_data import get_alerts, get_apps, get_logs, get_servers
-from agents.models import Agent
 from dashboards.models import Dashboard, DashboardWidget
 from .permissions import RoleRequiredMixin
 
 User = get_user_model()
+
+
+class OrgScopedMixin:
+    def get_org(self, request):
+        if request.user.role == 'SUPERADMIN':
+            org_id = request.session.get('active_org_id')
+            if org_id:
+                return Organization.objects.filter(id=org_id).first()
+            return Organization.objects.first()
+        return request.user.organization
 
 
 class BuhoLoginView(LoginView):
@@ -50,48 +62,78 @@ class OrganizationSwitchView(RoleRequiredMixin, View):
         return redirect(request.META.get('HTTP_REFERER', reverse('ui:overview')))
 
 
-class OverviewView(RoleRequiredMixin, View):
+class OverviewView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
-
-    def get_org(self, request):
-        if request.user.role == 'SUPERADMIN':
-            org_id = request.session.get('active_org_id')
-            if org_id:
-                return Organization.objects.filter(id=org_id).first()
-            return Organization.objects.first()
-        return request.user.organization
 
     def get(self, request):
         org = self.get_org(request)
-        dashboard = Dashboard.objects.filter(organization=org, is_default=True).first() if org else None
-        widgets = dashboard.widgets.all() if dashboard else []
+        now = timezone.now()
+        offline_seconds = getattr(settings, 'AGENT_OFFLINE_SECONDS', 90)
+        window_15m = now - timedelta(minutes=15)
+        window_1h = now - timedelta(hours=1)
+
+        if not org:
+            return render(request, 'ui/overview.html', {'empty': True, 'selected_agent': None, 'agents': []})
+
+        agents = Agent.objects.filter(organization=org)
+        online_qs = agents.filter(last_seen__gte=now - timedelta(seconds=offline_seconds), status=Agent.Status.ONLINE)
+        online_ids = list(online_qs.values_list('id', flat=True))
+
+        cpu_avg = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='cpu.percent').aggregate(v=Avg('value'))['v']
+        ram_avg = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='mem.percent').aggregate(v=Avg('value'))['v']
+        disk_worst = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='disk.root.used_percent').aggregate(v=Max('value'))['v']
+        net_recv = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='net.bytes_recv').aggregate(v=Sum('value'))['v'] or 0
+        net_sent = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='net.bytes_sent').aggregate(v=Sum('value'))['v'] or 0
+        error_logs = LogEntry.objects.filter(organization=org, ts__gte=window_1h, level=LogEntry.Level.ERROR).count()
+
+        selected_agent_id = request.GET.get('agent')
+        selected_agent = agents.filter(id=selected_agent_id).first() if selected_agent_id else agents.first()
+        series_points = MetricPoint.objects.none()
+        cpu_values, ram_values, net_in, net_out, labels = [], [], [], [], []
+        process_rows = []
+        if selected_agent:
+            series_points = MetricPoint.objects.filter(
+                organization=org,
+                agent=selected_agent,
+                ts__gte=window_15m,
+                name__in=['cpu.percent', 'mem.percent', 'net.bytes_recv', 'net.bytes_sent'],
+            ).order_by('ts')
+            grouped = {}
+            for point in series_points:
+                key = point.ts.replace(second=0, microsecond=0)
+                grouped.setdefault(key, {})[point.name] = point.value
+            for ts_key in sorted(grouped.keys()):
+                labels.append(ts_key.strftime('%H:%M'))
+                cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
+                ram_values.append(grouped[ts_key].get('mem.percent', 0))
+                net_in.append(grouped[ts_key].get('net.bytes_recv', 0))
+                net_out.append(grouped[ts_key].get('net.bytes_sent', 0))
+
+            latest_ts = ProcessSample.objects.filter(organization=org, agent=selected_agent).aggregate(v=Max('ts'))['v']
+            if latest_ts:
+                process_rows = ProcessSample.objects.filter(organization=org, agent=selected_agent, ts=latest_ts).order_by('-cpu', '-mem')[:25]
+
         context = {
+            'empty': MetricPoint.objects.filter(organization=org).count() == 0,
             'kpi_cards': [
-                {'title': 'Servidores monitoreados', 'value': 24, 'icon': 'bi-hdd-network'},
-                {'title': 'Agentes Online/Offline/Degraded', 'value': f"{Agent.objects.filter(status='ONLINE').count()}/{Agent.objects.filter(status='OFFLINE').count()}/{Agent.objects.filter(status='DEGRADED').count()}", 'icon': 'bi-robot'},
-                {'title': 'CPU Avg (15m)', 'value': '42%', 'icon': 'bi-cpu'},
-                {'title': 'RAM Avg (15m)', 'value': '63%', 'icon': 'bi-memory'},
-                {'title': 'Disk Used % (worst)', 'value': '88%', 'icon': 'bi-device-hdd'},
-                {'title': 'Network In/Out', 'value': '120MB/s · 80MB/s', 'icon': 'bi-diagram-3'},
-                {'title': 'Error rate (1h)', 'value': '2.8%', 'icon': 'bi-bug'},
-                {'title': 'Alertas activas', 'value': 7, 'icon': 'bi-bell'},
-                {'title': 'Uptime promedio', 'value': '99.92%', 'icon': 'bi-clock-history'},
-                {'title': 'Load average', 'value': '1.28', 'icon': 'bi-speedometer2'},
+                {'title': 'Agentes Online/Offline', 'value': f'{len(online_ids)}/{max(agents.count() - len(online_ids), 0)}', 'icon': 'bi-robot'},
+                {'title': 'CPU Avg (15m)', 'value': f'{(cpu_avg or 0):.2f}%', 'icon': 'bi-cpu'},
+                {'title': 'RAM Avg (15m)', 'value': f'{(ram_avg or 0):.2f}%', 'icon': 'bi-memory'},
+                {'title': 'Disk Worst %', 'value': f'{(disk_worst or 0):.2f}%', 'icon': 'bi-device-hdd'},
+                {'title': 'Network In/Out', 'value': f'{net_recv:.0f} / {net_sent:.0f}', 'icon': 'bi-diagram-3'},
+                {'title': 'Error logs (1h)', 'value': error_logs, 'icon': 'bi-bug'},
             ],
-            'cpu_labels': ['-15m','-12m','-9m','-6m','-3m','Ahora'],
-            'cpu_values': [34, 45, 38, 55, 48, 42],
-            'ram_values': [58, 60, 62, 63, 64, 63],
-            'net_in': [80, 110, 95, 140, 100, 120],
-            'net_out': [60, 70, 68, 77, 84, 80],
-            'process_labels': ['python','postgres','nginx','redis','celery'],
-            'process_values': [55, 48, 35, 30, 22],
-            'severity_values': [520, 90, 30],
-            'top_endpoints': [
-                {'endpoint': '/api/orders', 'errors': 21, 'p95': '520ms'},
-                {'endpoint': '/api/auth/login', 'errors': 13, 'p95': '410ms'},
-                {'endpoint': '/api/checkout', 'errors': 9, 'p95': '610ms'},
-            ],
-            'widgets': widgets,
+            'agents': agents,
+            'selected_agent': selected_agent,
+            'cpu_labels': labels,
+            'cpu_values': cpu_values,
+            'ram_values': ram_values,
+            'net_in': net_in,
+            'net_out': net_out,
+            'process_rows': process_rows,
+            'recent_logs': LogEntry.objects.filter(organization=org).order_by('-ts')[:50],
+            'recent_heartbeats': selected_agent.heartbeats.all()[:10] if selected_agent else [],
+            'recent_incidents': Incident.objects.filter(organization=org).order_by('-last_seen')[:10],
         }
         return render(request, 'ui/overview.html', context)
 
@@ -124,20 +166,20 @@ class WidgetCreateView(RoleRequiredMixin, View):
         return redirect('ui:overview')
 
 
-class ServersListView(RoleRequiredMixin, View):
+class ServersListView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
     def get(self, request):
-        return render(request, 'ui/servers_list.html', {'servers': get_servers()})
+        org = self.get_org(request)
+        return render(request, 'ui/servers_list.html', {'servers': Agent.objects.filter(organization=org) if org else []})
 
 
-class ServerDetailView(RoleRequiredMixin, View):
+class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
     def get(self, request, server_id):
-        server = next((s for s in get_servers() if s['id'] == server_id), None)
-        if not server:
-            return redirect('ui:servers')
+        org = self.get_org(request)
+        server = get_object_or_404(Agent.objects.filter(organization=org), id=server_id)
         return render(request, 'ui/server_detail.html', {'server': server})
 
 
@@ -145,28 +187,31 @@ class AppsListView(RoleRequiredMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
     def get(self, request):
-        return render(request, 'ui/apps.html', {'apps': get_apps()})
+        return render(request, 'ui/apps.html', {'apps': []})
 
 
-class LogsExplorerView(RoleRequiredMixin, View):
+class LogsExplorerView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST'}
 
     def get(self, request):
         level_filter = request.GET.get('level', '')
-        search = request.GET.get('q', '').strip().lower()
-        logs = get_logs()
+        search = request.GET.get('q', '').strip()
+        org = self.get_org(request)
+        logs = LogEntry.objects.filter(organization=org).order_by('-ts') if org else LogEntry.objects.none()
         if level_filter:
-            logs = [entry for entry in logs if entry['level'] == level_filter]
+            logs = logs.filter(level=level_filter)
         if search:
-            logs = [entry for entry in logs if search in entry['message'].lower() or search in entry['source'].lower()]
-        return render(request, 'ui/logs.html', {'logs': logs, 'level_filter': level_filter, 'search': search})
+            logs = logs.filter(message__icontains=search)
+        return render(request, 'ui/logs.html', {'logs': logs[:200], 'level_filter': level_filter, 'search': search})
 
 
-class AlertsView(RoleRequiredMixin, View):
+class AlertsView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST'}
 
     def get(self, request):
-        return render(request, 'ui/alerts.html', {'alerts': get_alerts()})
+        org = self.get_org(request)
+        alerts = Incident.objects.filter(organization=org).order_by('-last_seen') if org else Incident.objects.none()
+        return render(request, 'ui/alerts.html', {'alerts': alerts})
 
 
 class SettingsDashboardView(RoleRequiredMixin, View):

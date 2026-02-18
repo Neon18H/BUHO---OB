@@ -1,8 +1,7 @@
-import json
-import secrets
+from textwrap import dedent
 
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views import View
@@ -68,7 +67,8 @@ class AgentsInstallView(RoleRequiredMixin, AgentOrganizationMixin, View):
 
     def get(self, request):
         latest_token = self.scoped_tokens(request).first()
-        return render(request, 'agents/install.html', {'form': TokenCreateForm(), 'latest_token': latest_token})
+        server_url = request.build_absolute_uri('/').rstrip('/')
+        return render(request, 'agents/install.html', {'form': TokenCreateForm(), 'latest_token': latest_token, 'server_url': server_url})
 
 
 class TokensView(RoleRequiredMixin, AgentOrganizationMixin, View):
@@ -137,95 +137,147 @@ class TokenRevokeView(RoleRequiredMixin, AgentOrganizationMixin, View):
         return redirect('agents:tokens')
 
 
-class AgentDownloadLinuxView(RoleRequiredMixin, AgentOrganizationMixin, View):
-    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
-
+class AgentDownloadLinuxView(View):
     def get(self, request):
         token = request.GET.get('token', '')
-        create_audit_log(request=request, actor=request.user, action='DOWNLOAD_AGENT', target_type='AgentDownload', metadata={'platform': 'linux'})
+        if not token:
+            return HttpResponseBadRequest('token required')
         server_url = request.build_absolute_uri('/').rstrip('/')
-        script = f'''#!/usr/bin/env bash
-set -e
-BUHO_URL="{server_url}"
-TOKEN="{token}"
-INSTALL_DIR="/opt/buho-agent"
-mkdir -p "$INSTALL_DIR"
-cat > "$INSTALL_DIR/agent.py" <<'EOF'
-import json, os, time, socket, platform, urllib.request
-BUHO_URL = os.environ.get("BUHO_URL", "{server_url}")
-TOKEN = os.environ.get("BUHO_TOKEN", "{token}")
-CONF = "/opt/buho-agent/config.json"
-
-def post(url, data, headers=None):
-    body = json.dumps(data).encode()
-    req = urllib.request.Request(url, data=body, headers={{"Content-Type": "application/json", **(headers or {{}})}})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read().decode())
-
+        script = dedent("""#!/usr/bin/env bash
+set -euo pipefail
+BUHO_URL="__SERVER_URL__"
+TOKEN="__TOKEN__"
+HAS_SUDO=0; if command -v sudo >/dev/null 2>&1; then HAS_SUDO=1; fi
+for bin in bash curl python3; do command -v "$bin" >/dev/null 2>&1 || { echo "missing $bin"; exit 1; }; done
+if [[ "$HAS_SUDO" == "1" && $(id -u) -ne 0 ]]; then PREFIX="sudo"; else PREFIX=""; fi
+if [[ -n "$PREFIX" || $(id -u) -eq 0 ]]; then INSTALL_DIR=/opt/buho-agent; CONF_DIR=/etc/buho-agent; LOG_FILE=/var/log/buho-agent.log; else INSTALL_DIR="$HOME/.buho-agent"; CONF_DIR="$HOME/.config/buho-agent"; LOG_FILE="$HOME/.buho-agent/buho-agent.log"; fi
+$PREFIX mkdir -p "$INSTALL_DIR" "$CONF_DIR"
+if python3 -m venv --help >/dev/null 2>&1; then python3 -m venv "$INSTALL_DIR/.venv" && PY="$INSTALL_DIR/.venv/bin/python"; else PY=python3; fi
+$PY -m pip install --quiet --disable-pip-version-check requests psutil || true
+cat > "$INSTALL_DIR/agent.py" <<'PYEOF'
+import json, os, time, socket, platform, pathlib, re
+from datetime import datetime, timezone
+import requests, psutil
+SERVER=os.environ.get('BUHO_URL'); TOKEN=os.environ.get('BUHO_TOKEN'); CONF=os.environ.get('BUHO_CONF'); LOG_FILE=os.environ.get('BUHO_LOG')
+S=re.compile(r'(?i)(authorization:|bearer\s+[A-Za-z0-9\-_\.]+|api[_-]?key\s*=\s*\S+|password\s*=\s*\S+|token\s*=\s*\S+)')
+def r(v): return S.sub('[REDACTED]', v or '')
+def log(m): pathlib.Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True); open(LOG_FILE,'a').write(f"{datetime.utcnow().isoformat()} {m}\n")
+def req(path,payload,h):
+    try: return requests.post(SERVER+path,json=payload,headers=h,timeout=8)
+    except Exception as e: log(f"request-error {e}"); return None
 def enroll():
-    if os.path.exists(CONF):
-        return json.load(open(CONF))
-    payload = {{"token": TOKEN, "hostname": socket.gethostname(), "ip": "127.0.0.1", "os": platform.platform(), "version": "0.1.0"}}
-    data = post(BUHO_URL + "/api/agents/enroll", payload)
-    with open(CONF, "w") as f: json.dump(data, f)
-    return data
-
+    if os.path.exists(CONF): return json.load(open(CONF))
+    payload={'token':TOKEN,'hostname':socket.gethostname(),'ip_address':'127.0.0.1','os':platform.platform(),'arch':platform.machine(),'version':'0.1.0','name':socket.gethostname()}
+    res=req('/api/agents/enroll',payload,{'Content-Type':'application/json'})
+    if not res or res.status_code != 200: raise SystemExit('enroll failed')
+    data=res.json(); pathlib.Path(CONF).parent.mkdir(parents=True, exist_ok=True); open(CONF,'w').write(json.dumps(data)); os.chmod(CONF,0o600); return data
+def metrics():
+    d=psutil.disk_usage('/'); n=psutil.net_io_counters(); m=psutil.virtual_memory()
+    return [{'name':'cpu.percent','value':psutil.cpu_percent(),'unit':'%'},{'name':'mem.percent','value':m.percent,'unit':'%'},{'name':'disk.root.used_percent','value':d.percent,'unit':'%'},{'name':'net.bytes_sent','value':n.bytes_sent,'unit':'bytes'},{'name':'net.bytes_recv','value':n.bytes_recv,'unit':'bytes'},{'name':'load.1m','value':os.getloadavg()[0] if hasattr(os,'getloadavg') else 0,'unit':'load'}]
+def procs():
+    rows=[]
+    for p in psutil.process_iter(['pid','name','username','cmdline','cpu_percent','memory_percent']):
+        try: rows.append({'pid':p.info['pid'],'name':p.info.get('name') or 'n/a','cpu':p.info.get('cpu_percent') or 0,'mem':p.info.get('memory_percent') or 0,'user':p.info.get('username') or '', 'cmdline':r(' '.join(p.info.get('cmdline') or []))})
+        except Exception: pass
+    rows=sorted(rows,key=lambda x:(x['cpu'],x['mem']),reverse=True)[:25]
+    return rows
+def logs_tail():
+    for p in ['/var/log/syslog','/var/log/messages']:
+        if os.path.exists(p):
+            try:
+                tail_lines = open(p,'r',errors='ignore').read().splitlines()[-5:]
+                return [{'ts':datetime.now(timezone.utc).isoformat(),'level':'INFO','source':'syslog','message':r(line.strip()),'fields':{}} for line in tail_lines if line.strip()]
+            except Exception:
+                return []
+    return []
 def loop():
-    conf = enroll()
+    conf=enroll(); h={'X-Buho-Agent-Id':str(conf['agent_id']),'X-Buho-Agent-Key':conf['agent_key']}; i=0
     while True:
-        hb = {{"agent_id": conf["agent_id"], "status": "ONLINE", "metadata": {{"demo": True, "load": 0.33}}}}
-        post(BUHO_URL + "/api/agents/heartbeat", hb, headers={{"X-Buho-Agent-Key": conf["agent_key"]}})
-        print("heartbeat sent")
-        time.sleep(15)
-
-if __name__ == "__main__":
-    loop()
+        i+=1
+        req('/api/agents/heartbeat',{'status':'ONLINE','metadata':{'uptime':time.time(),'agent_version':'0.1.0'}},h)
+        req('/api/ingest/metrics',{'ts':datetime.now(timezone.utc).isoformat(),'metrics':metrics()},h)
+        if i % 2 == 0: req('/api/ingest/processes',{'ts':datetime.now(timezone.utc).isoformat(),'processes':procs()},h)
+        req('/api/ingest/logs',{'logs':logs_tail()},h)
+        time.sleep(10)
+if __name__=='__main__':
+    backoff=2
+    while True:
+        try: loop()
+        except Exception as e: log(f'loop-error {e}'); time.sleep(backoff); backoff=min(backoff*2,60)
+PYEOF
+cat > "$INSTALL_DIR/buho-agent.env" <<EOF
+BUHO_URL=$BUHO_URL
+BUHO_TOKEN=$TOKEN
+BUHO_CONF=$CONF_DIR/config.json
+BUHO_LOG=$LOG_FILE
 EOF
-
-cat > "$INSTALL_DIR/buho-agent.service" <<'EOF'
+if command -v systemctl >/dev/null 2>&1 && [[ -n "$PREFIX" || $(id -u) -eq 0 ]]; then
+$PREFIX tee /etc/systemd/system/buho-agent.service >/dev/null <<EOF
 [Unit]
 Description=Buho Agent
 After=network.target
-
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/buho-agent/agent.py
+EnvironmentFile=$INSTALL_DIR/buho-agent.env
+ExecStart=$PY $INSTALL_DIR/agent.py
 Restart=always
-Environment=BUHO_URL={server_url}
-Environment=BUHO_TOKEN={token}
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
-if command -v systemctl >/dev/null 2>&1; then
-  sudo cp "$INSTALL_DIR/buho-agent.service" /etc/systemd/system/buho-agent.service || true
-  sudo systemctl daemon-reload || true
-  sudo systemctl enable --now buho-agent || true
+$PREFIX systemctl daemon-reload
+$PREFIX systemctl enable --now buho-agent
+echo "Buho agent activo con systemd"
 else
-  echo "systemd no disponible. Ejecuta manualmente: BUHO_TOKEN=$TOKEN BUHO_URL=$BUHO_URL python3 /opt/buho-agent/agent.py"
+nohup $PY "$INSTALL_DIR/agent.py" > "$INSTALL_DIR/agent.out" 2>&1 &
+echo "No systemd/root. Running in user mode (nohup)."
 fi
-
-echo "Agente instalado y reportando"
-'''
+""").replace('__SERVER_URL__', server_url).replace('__TOKEN__', token)
         response = HttpResponse(script, content_type='text/x-shellscript')
         response['Content-Disposition'] = 'attachment; filename="buho-agent-linux.sh"'
         return response
 
 
-class AgentDownloadWindowsView(RoleRequiredMixin, AgentOrganizationMixin, View):
-    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
-
+class AgentDownloadWindowsView(View):
     def get(self, request):
         token = request.GET.get('token', '')
-        create_audit_log(request=request, actor=request.user, action='DOWNLOAD_AGENT', target_type='AgentDownload', metadata={'platform': 'windows'})
+        if not token:
+            return HttpResponseBadRequest('token required')
         server_url = request.build_absolute_uri('/').rstrip('/')
-        script = f'''$BuhoUrl = "{server_url}"
-$Token = "{token}"
-Write-Host "Buho agent installer (placeholder)"
-Write-Host "Download complete. Windows service installer en preparación."
-Write-Host "For now run heartbeat stub manually against $BuhoUrl"
-'''
+        script = dedent("""$BuhoUrl = "__SERVER_URL__"
+$Token = "__TOKEN__"
+$Root = Join-Path $env:USERPROFILE ".buho-agent"
+New-Item -ItemType Directory -Force -Path $Root | Out-Null
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Host "Python3 is required"; exit 1 }
+$agent = @"
+import os,time,socket,platform,requests,json
+url=os.environ.get('BUHO_URL'); token=os.environ.get('BUHO_TOKEN'); conf=os.path.join(os.environ.get('BUHO_ROOT'),'config.json')
+def post(p,d,h=None): return requests.post(url+p,json=d,headers=h or {},timeout=8)
+if os.path.exists(conf): c=json.load(open(conf))
+else:
+ r=post('/api/agents/enroll',{'token':token,'hostname':socket.gethostname(),'ip_address':'127.0.0.1','os':platform.platform(),'arch':platform.machine(),'version':'0.1.0'})
+ c=r.json(); open(conf,'w').write(json.dumps(c))
+h={'X-Buho-Agent-Id':str(c['agent_id']),'X-Buho-Agent-Key':c['agent_key']}
+while True:
+ post('/api/agents/heartbeat',{'status':'ONLINE','metadata':{'agent_version':'0.1.0'}},h)
+ post('/api/ingest/metrics',{'metrics':[{'name':'cpu.percent','value':0,'unit':'%'}]},h)
+ time.sleep(10)
+"@
+Set-Content -Path (Join-Path $Root "agent.py") -Value $agent
+$env:BUHO_URL=$BuhoUrl; $env:BUHO_TOKEN=$Token; $env:BUHO_ROOT=$Root
+python (Join-Path $Root "agent.py")
+""").replace('__SERVER_URL__', server_url).replace('__TOKEN__', token)
         response = HttpResponse(script, content_type='text/plain')
         response['Content-Disposition'] = 'attachment; filename="buho-agent-windows.ps1"'
+        return response
+
+
+class AgentDownloadLinuxPyView(View):
+    def get(self, request):
+        token = request.GET.get('token', '')
+        if not token:
+            return HttpResponseBadRequest('token required')
+        server_url = request.build_absolute_uri('/').rstrip('/')
+        py = f"import os; print('Use linux.sh installer for full setup. URL={server_url}, token={token}')\n"
+        response = HttpResponse(py, content_type='text/x-python')
+        response['Content-Disposition'] = 'attachment; filename="buho-agent-linux.py"'
         return response
