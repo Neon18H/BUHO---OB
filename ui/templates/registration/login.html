@@ -34,6 +34,7 @@
           <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-lock"></i></span>{{ form.password }}</div>
           {% if form.errors %}<div class="alert alert-danger">Usuario o contraseña inválidos.</div>{% endif %}
           <button class="btn btn-primary w-100" type="submit">Buho Secure Login</button>
+          <a class="btn btn-link w-100 mt-2" href="{% url 'accounts:register' %}">Registro inicial</a>
         </form>
       </div>
     </div>

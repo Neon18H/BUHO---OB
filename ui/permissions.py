@@ -65,7 +65,7 @@ class RoleRequiredUIMixin(BaseRoleRequiredMixin):
             messages.error(request, self.permission_denied_message)
             return self._resolve_redirect(request, self.get_permission_redirect_url())
 
-        needs_org = self.require_organization and not request.user.is_superuser and request.user.role != 'SUPERADMIN'
+        needs_org = self.require_organization and not request.user.is_superuser
         if needs_org and not request.user.organization_id:
             messages.error(request, self.missing_organization_message)
             return self._resolve_redirect(request, self.get_missing_organization_redirect_url())
@@ -79,10 +79,4 @@ class RoleRequiredMixin(RoleRequiredUIMixin):
 
 class OrganizationScopedMixin:
     def get_active_organization(self):
-        user = self.request.user
-        if user.role == 'SUPERADMIN':
-            selected_id = self.request.session.get('active_org_id')
-            if selected_id:
-                return Organization.objects.filter(id=selected_id).first()
-            return None
-        return user.organization
+        return self.request.user.organization
