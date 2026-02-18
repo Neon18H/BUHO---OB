@@ -12,6 +12,7 @@ from accounts.models import Organization
 from audit.models import AuditLog
 from audit.utils import create_audit_log
 from .demo_data import get_alerts, get_apps, get_logs, get_servers
+from agents.models import Agent
 from .permissions import RoleRequiredMixin
 
 User = get_user_model()
@@ -55,10 +56,10 @@ class OverviewView(RoleRequiredMixin, View):
             logs = logs.filter(Q(organization=request.user.organization) | Q(organization__isnull=True))
         context = {
             'kpis': {
-                'agents_online': 18,
+                'agents_online': Agent.objects.filter(status='ONLINE').count(),
                 'active_alerts': 6,
                 'errors_24h': 132,
-                'monitored_servers': 24,
+                'monitored_servers': Agent.objects.count() or 24,
             },
             'events': logs[:10],
             'chart_labels': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
@@ -149,7 +150,7 @@ class UserCreateView(RoleRequiredMixin, View):
             create_audit_log(
                 request=request,
                 actor=request.user,
-                action='CREATE',
+                action='CREATE_USER',
                 target_type='User',
                 target_id=str(user.id),
                 organization=user.organization,
@@ -179,7 +180,7 @@ class UserUpdateView(RoleRequiredMixin, View):
             create_audit_log(
                 request=request,
                 actor=request.user,
-                action='UPDATE',
+                action='UPDATE_USER',
                 target_type='User',
                 target_id=str(updated.id),
                 organization=updated.organization,
@@ -204,7 +205,7 @@ class UserDeactivateView(RoleRequiredMixin, View):
         create_audit_log(
             request=request,
             actor=request.user,
-            action='DELETE',
+            action='DEACTIVATE_USER',
             target_type='User',
             target_id=str(target.id),
             organization=target.organization,
@@ -228,7 +229,7 @@ class OrganizationUpdateView(RoleRequiredMixin, View):
             create_audit_log(
                 request=request,
                 actor=request.user,
-                action='UPDATE',
+                action='UPDATE_ORGANIZATION',
                 target_type='Organization',
                 target_id=str(org.id),
                 organization=org,

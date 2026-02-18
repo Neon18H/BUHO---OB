@@ -1,0 +1,47 @@
+{% extends 'ui/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div><h1 class="h4 mb-0">Enrollment Tokens</h1><small class="text-body-secondary">Gestiona instalación y enrollment de agentes.</small></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><strong>Crear token</strong></div>
+      <div class="card-body">
+        <form method="post" action="{% url 'agents:token_create' %}" class="vstack gap-2">
+          {% csrf_token %}
+          <label class="form-label">Expiración</label>
+          {{ form.expiration }}
+          <button class="btn btn-primary mt-2">Crear token</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card table-card">
+      <div class="card-header"><strong>Tokens</strong></div>
+      <div class="table-responsive sticky-table">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>Token</th><th>Expires</th><th>Used</th><th>Created by</th><th></th></tr></thead>
+          <tbody>
+            {% for token in tokens %}
+            <tr>
+              <td><code id="token-{{ token.id }}">{{ token.masked_token }}</code> <button class="btn btn-link btn-sm" onclick="navigator.clipboard.writeText('{{ token.token }}')">Copiar</button></td>
+              <td>{{ token.expires_at|date:'Y-m-d H:i' }}</td>
+              <td>{% if token.is_used %}<span class="badge text-bg-secondary">Used</span>{% else %}<span class="badge text-bg-success">Available</span>{% endif %}{% if token.is_revoked %} <span class="badge text-bg-danger">Revoked</span>{% endif %}</td>
+              <td>{{ token.created_by|default:'system' }}</td>
+              <td>
+                {% if not token.is_revoked %}
+                <form method="post" action="{% url 'agents:token_revoke' token.id %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Revocar</button></form>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}<tr><td colspan="5" class="text-body-secondary">No hay tokens.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+<div class="card table-card">
+    {% if title %}<div class="card-header d-flex justify-content-between align-items-center"><strong>{{ title }}</strong>{% if subtitle %}<span class="text-body-secondary small">{{ subtitle }}</span>{% endif %}</div>{% endif %}
+    <div class="table-responsive sticky-table">
+        <table class="table table-hover align-middle mb-0">
+            {{ content }}
+        </table>
+    </div>
+</div>
