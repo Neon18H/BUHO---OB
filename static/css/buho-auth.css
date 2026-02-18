@@ -1,0 +1,16 @@
+:root { --bg:#05070f; --panel:#111629; --text:#eef2ff; --muted:#9aa4c4; --accent:#6c8cff; }
+html[data-theme='light'] { --bg:#e8ecf7; --panel:#fff; --text:#111827; --muted:#475569; --accent:#3559ff; }
+body { margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: radial-gradient(circle at 30% 20%, #273a6f, var(--bg)); color:var(--text); min-height:100vh; }
+.auth-shell { display:grid; grid-template-columns: 1fr 1fr; min-height:100vh; }
+.auth-brand { position:relative; display:flex; align-items:center; justify-content:center; padding:3rem; }
+.glow { position:absolute; width:280px; height:280px; border-radius:50%; background:rgba(108,140,255,.35); filter:blur(80px); animation:pulse 7s ease-in-out infinite; }
+.brand-content { position:relative; z-index:2; max-width:480px; }
+.brand-content ul { color:var(--muted); }
+.auth-form-wrap { display:flex; align-items:center; justify-content:center; padding:2rem; }
+.auth-card { width:min(460px,100%); background:var(--panel); border:1px solid rgba(255,255,255,.08); border-radius:18px; box-shadow:0 24px 60px rgba(0,0,0,.28); }
+.input-group-text, .form-control { background:transparent; color:var(--text); border-color:rgba(255,255,255,.2); }
+.form-control:focus { box-shadow:none; border-color:var(--accent); }
+.btn-primary { background:var(--accent); border-color:var(--accent); }
+.auth-footer { position:fixed; bottom:12px; width:100%; text-align:center; color:var(--muted); font-size:.85rem; }
+@keyframes pulse { 0%,100%{transform:scale(.85)} 50%{transform:scale(1.1)} }
+@media (max-width: 991px){ .auth-shell{grid-template-columns:1fr;} .auth-brand{padding-bottom:1rem;} }

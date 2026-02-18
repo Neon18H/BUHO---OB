@@ -1,45 +1,30 @@
 {% extends 'ui/base.html' %}
 {% block content %}
-<h1 class="h3 mb-3">Centro de instalación del agente</h1>
-<div class="row g-3">
-  <div class="col-lg-5">
-    <div class="card p-3">
-      <h5>Paso 1 · Crear token de instalación</h5>
-      <form method="post" action="{% url 'agents:token_create' %}" class="vstack gap-2">{% csrf_token %}
-        <label class="form-label mb-0">Servidor (opcional)</label>{{ form.server_name_optional }}
-        <label class="form-label mb-0">Tags (opcional)</label>{{ form.tags }}
-        <label class="form-label mb-0">Expiración</label>{{ form.expiration }}
-        <div class="form-check">{{ form.allow_multi_use }}<label class="form-check-label ms-2">Multi-uso</label></div>
-        <button class="btn btn-primary">Generar token</button>
-      </form>
-      {% if request.session.latest_token_plain %}
-      <div class="alert alert-success mt-3 mb-0">
-        Token creado: <code id="new-token">{{ request.session.latest_token_plain }}</code>
-        <button class="btn btn-sm btn-outline-success" onclick="copyText('{{ request.session.latest_token_plain }}')">Copiar</button>
-      </div>
-      {% endif %}
+<h1 class="h4 mb-3">Instalar agente</h1>
+<div class="card p-3 mb-3">
+  <form method="post" action="{% url 'agents:token_create' %}">{% csrf_token %}
+    <div class="row g-2">
+      <div class="col-md-3">{{ form.expiration }}</div>
+      <div class="col-md-3">{{ form.server_name_optional }}</div>
+      <div class="col-md-2">{{ form.tags }}</div><div class="col-md-2 form-check mt-2">{{ form.allow_multi_use }} <label class='form-check-label'>Multi-use</label></div>
+      <div class="col-md-2 d-grid"><button class="btn btn-primary">Crear token</button></div>
     </div>
-  </div>
-  <div class="col-lg-7">
-    <div class="card p-3 mb-3">
-      <h5>Paso 2 · Descargar agente</h5>
-      <p class="text-body-secondary">Selecciona plataforma y descarga el instalador.</p>
-      {% with tk=request.session.latest_token_plain|default:latest_token.token %}
-      <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-outline-primary" href="{% url 'agents:download_linux' %}?token={{ tk|default:'' }}"><i class="bi bi-ubuntu"></i> Linux (.sh)</a>
-        <a class="btn btn-outline-secondary" href="{% url 'agents:download_windows' %}?token={{ tk|default:'' }}"><i class="bi bi-windows"></i> Windows (.ps1)</a>
-      </div>
-      {% endwith %}
-    </div>
-    <div class="card p-3">
-      <h5>Paso 3 · Instalar</h5>
-      {% with tk=request.session.latest_token_plain|default:latest_token.token %}
-      <label class="form-label">Opción A (curl | bash)</label>
-      <div class="code-line"><code id="cmd-a">curl -fsSL {{ request.scheme }}://{{ request.get_host }}{% url 'agents:download_linux' %}?token={{ tk|default:'' }} | bash</code><button class="btn btn-sm btn-outline-secondary" onclick="copyFrom('cmd-a')">Copiar</button></div>
-      <label class="form-label mt-3">Opción B (descargar + ejecutar)</label>
-      <div class="code-line"><code id="cmd-b">chmod +x buho-agent-linux.sh && ./buho-agent-linux.sh</code><button class="btn btn-sm btn-outline-secondary" onclick="copyFrom('cmd-b')">Copiar</button></div>
-      {% endwith %}
-    </div>
-  </div>
+  </form>
 </div>
+{% if latest_token %}
+<div class="card p-3">
+  <div class="mb-2"><strong>Buho Server URL:</strong> <code>{{ server_url }}</code></div>
+  <div class="mb-2"><strong>Token:</strong> <code id="tokenText">{{ latest_token.token }}</code></div>
+  <label class="form-label">Instalación Linux (sudo)</label>
+  <pre id="cmdSudo">curl -fsSL {{ server_url }}/agents/download/linux.sh?token={{ latest_token.token }} | sudo bash</pre>
+  <button class="btn btn-outline-primary btn-sm mb-3" onclick="copyFrom('cmdSudo')">Copiar comando</button>
+  <label class="form-label">Instalación Linux (sin sudo)</label>
+  <pre id="cmdNoSudo">curl -fsSL {{ server_url }}/agents/download/linux.sh?token={{ latest_token.token }} | bash</pre>
+  <button class="btn btn-outline-primary btn-sm" onclick="copyFrom('cmdNoSudo')">Copiar comando</button>
+  <hr>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ server_url }}/agents/download/windows.ps1?token={{ latest_token.token }}">Descargar windows.ps1</a>
+</div>
+{% else %}
+<div class="alert alert-info">Crea un token para empezar.</div>
+{% endif %}
 {% endblock %}

@@ -7,17 +7,17 @@
   <div class="offcanvas-body">
     <form method="get" class="vstack gap-2">
       <select class="form-select" name="level"><option value="">All levels</option>{% for lvl in 'INFO,WARN,ERROR'.split(',') %}<option value="{{ lvl }}" {% if level_filter == lvl %}selected{% endif %}>{{ lvl }}</option>{% endfor %}</select>
-      <input class="form-control" name="q" value="{{ search }}" placeholder="Text or source">
+      <input class="form-control" name="q" value="{{ search }}" placeholder="Text in message">
       <button class="btn btn-primary">Apply</button>
     </form>
   </div>
 </div>
 <div class="card table-card">
   <div class="table-responsive sticky-table">
-    <table class="table table-striped align-middle mb-0"><thead><tr><th>Timestamp</th><th>Source</th><th>Level</th><th>Message</th></tr></thead><tbody>
+    <table class="table table-striped align-middle mb-0"><thead><tr><th>Timestamp</th><th>Agent</th><th>Source</th><th>Level</th><th>Message</th></tr></thead><tbody>
       {% for log in logs %}
-      <tr><td>{{ log.timestamp|date:'Y-m-d H:i:s' }}</td><td>{{ log.source }}</td><td><span class="badge text-bg-{{ log.level|badge_class }}">{{ log.level }}</span></td><td>{{ log.message }}</td></tr>
-      {% empty %}<tr><td colspan="4" class="text-body-secondary">No logs match current filters.</td></tr>{% endfor %}
+      <tr><td>{{ log.ts|date:'Y-m-d H:i:s' }}</td><td>{{ log.agent.name }}</td><td>{{ log.source }}</td><td><span class="badge text-bg-{{ log.level|badge_class }}">{{ log.level }}</span></td><td>{{ log.message }}</td></tr>
+      {% empty %}<tr><td colspan="5" class="text-body-secondary">No logs match current filters.</td></tr>{% endfor %}
     </tbody></table>
   </div>
 </div>

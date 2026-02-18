@@ -1,23 +1,12 @@
 {% extends 'ui/base.html' %}
-{% load ui_tags %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 mb-0">{{ server.hostname }}</h1>
-  <span class="badge text-bg-{{ server.status|badge_class }}">{{ server.status }}</span>
+<h1 class="h4 mb-3">{{ server.name }}</h1>
+<div class="card p-3">
+  <div><strong>Hostname:</strong> {{ server.hostname }}</div>
+  <div><strong>IP:</strong> {{ server.ip_address }}</div>
+  <div><strong>OS:</strong> {{ server.os }} ({{ server.arch }})</div>
+  <div><strong>Version:</strong> {{ server.version }}</div>
+  <div><strong>Status:</strong> {{ server.status }}</div>
+  <div><strong>Last seen:</strong> {{ server.last_seen|date:'Y-m-d H:i:s' }}</div>
 </div>
-<ul class="nav nav-tabs mb-3">
-  <li class="nav-item"><a class="nav-link active" href="#">Overview</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Metrics</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Processes</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Apps</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Logs</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Alerts</a></li>
-</ul>
-<div class="card"><div class="card-body">
-  <div class="row g-3">
-    <div class="col-md-4"><strong>IP:</strong> {{ server.ip }}</div>
-    <div class="col-md-4"><strong>OS:</strong> {{ server.os }}</div>
-    <div class="col-md-4"><strong>Last seen:</strong> {{ server.last_seen|date:'Y-m-d H:i' }}</div>
-  </div>
-</div></div>
 {% endblock %}

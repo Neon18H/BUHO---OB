@@ -3,55 +3,54 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h1 class="h3 mb-0">Overview</h1>
-    <small class="text-body-secondary">Enterprise observability dashboard (demo)</small>
+    <small class="text-body-secondary">Datos reales de agentes Buho.</small>
   </div>
-  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#widgetModal"><i class="bi bi-plus-circle"></i> Agregar widget</button>
+  <form method="get" class="d-flex gap-2">
+    <select class="form-select" name="agent" onchange="this.form.submit()">
+      {% for agent in agents %}
+      <option value="{{ agent.id }}" {% if selected_agent and selected_agent.id == agent.id %}selected{% endif %}>{{ agent.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
 </div>
 
 <div class="row g-3 mb-4">
   {% for kpi in kpi_cards %}
-  <div class="col-sm-6 col-xl-3">{% include 'ui/components/kpi_card.html' with icon=kpi.icon title=kpi.title value=kpi.value %}</div>
+  <div class="col-sm-6 col-xl-4">{% include 'ui/components/kpi_card.html' with icon=kpi.icon title=kpi.title value=kpi.value %}</div>
   {% endfor %}
 </div>
+
+{% if empty %}
+<div class="alert alert-info">Aún no hay telemetría. Instala el agente desde <a href="{% url 'agents:install' %}">Agentes → Install</a>.</div>
+{% endif %}
 
 <div class="row g-3">
   <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='CPU / RAM (15m)' chart_id='cpuRamChart' %}</div>
   <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Network In / Out (15m)' chart_id='networkChart' %}</div>
-  <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Top 5 procesos por CPU' chart_id='processChart' %}</div>
-  <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Logs por severidad' chart_id='severityChart' %}</div>
 </div>
 
 <div class="card mt-3 table-card">
-  <div class="card-header"><strong>Top endpoints con errores</strong></div>
-  <div class="table-responsive"><table class="table mb-0"><thead><tr><th>Endpoint</th><th>Errores/h</th><th>Lat p95</th></tr></thead><tbody>{% for row in top_endpoints %}<tr><td>{{ row.endpoint }}</td><td>{{ row.errors }}</td><td>{{ row.p95 }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card-header"><strong>Top procesos (último batch)</strong></div>
+  <div class="table-responsive"><table class="table mb-0"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>MEM</th><th>User</th><th>Cmdline</th></tr></thead><tbody>{% for row in process_rows %}<tr><td>{{ row.pid }}</td><td>{{ row.name }}</td><td>{{ row.cpu }}</td><td>{{ row.mem }}</td><td>{{ row.user }}</td><td class="text-truncate" style="max-width:260px">{{ row.cmdline_redacted }}</td></tr>{% empty %}<tr><td colspan="6" class="text-body-secondary">Sin procesos aún.</td></tr>{% endfor %}</tbody></table></div>
 </div>
 
-{% if widgets %}
-<div class="row g-3 mt-1">
-  {% for widget in widgets %}
-    <div class="col-lg-4"><div class="card p-3"><h6>{{ widget.title }}</h6><small class="text-body-secondary">Tipo: {{ widget.type }}</small><pre class="small mb-0">{{ widget.config_json }}</pre></div></div>
-  {% endfor %}
-</div>
-{% endif %}
-
-<div class="modal fade" id="widgetModal" tabindex="-1">
-  <div class="modal-dialog"><form method="post" action="{% url 'ui:widget_create' %}" class="modal-content">{% csrf_token %}
-    <div class="modal-header"><h5 class="modal-title">Agregar widget</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-    <div class="modal-body vstack gap-2">
-      <input class="form-control" name="title" placeholder="Título del widget" required>
-      <select class="form-select" name="type"><option>KPI</option><option>Time-series</option><option>Bar</option><option>Pie</option><option>Table</option></select>
-      <textarea class="form-control" name="config_json" rows="4" placeholder='{"metric":"cpu"}'></textarea>
+<div class="row mt-3 g-3">
+  <div class="col-lg-6">
+    <div class="card table-card">
+      <div class="card-header"><strong>Logs recientes</strong></div>
+      <div class="table-responsive"><table class="table mb-0"><thead><tr><th>TS</th><th>Level</th><th>Source</th><th>Message</th></tr></thead><tbody>{% for log in recent_logs %}<tr><td>{{ log.ts|date:'Y-m-d H:i:s' }}</td><td>{{ log.level }}</td><td>{{ log.source }}</td><td>{{ log.message }}</td></tr>{% empty %}<tr><td colspan="4" class="text-body-secondary">Sin logs.</td></tr>{% endfor %}</tbody></table></div>
     </div>
-    <div class="modal-footer"><button class="btn btn-primary">Guardar widget</button></div>
-  </form></div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card table-card mb-3"><div class="card-header"><strong>Últimos heartbeats</strong></div><div class="table-responsive"><table class="table mb-0"><thead><tr><th>TS</th><th>Status</th><th>Metadata</th></tr></thead><tbody>{% for hb in recent_heartbeats %}<tr><td>{{ hb.ts|date:'Y-m-d H:i:s' }}</td><td>{{ hb.status }}</td><td>{{ hb.metadata_json }}</td></tr>{% empty %}<tr><td colspan="3" class="text-body-secondary">Sin heartbeats.</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="card table-card"><div class="card-header"><strong>Incidentes recientes</strong></div><div class="table-responsive"><table class="table mb-0"><thead><tr><th>Tipo</th><th>Severity</th><th>Status</th><th>Last seen</th></tr></thead><tbody>{% for incident in recent_incidents %}<tr><td>{{ incident.type }}</td><td>{{ incident.severity }}</td><td>{{ incident.status }}</td><td>{{ incident.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="4" class="text-body-secondary">Sin incidentes.</td></tr>{% endfor %}</tbody></table></div></div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 new Chart(document.getElementById('cpuRamChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'CPU %',data:{{ cpu_values|safe }},borderColor:'#4f46e5',tension:.35},{label:'RAM %',data:{{ ram_values|safe }},borderColor:'#06b6d4',tension:.35}]}});
-new Chart(document.getElementById('networkChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'In MB/s',data:{{ net_in|safe }},borderColor:'#16a34a'},{label:'Out MB/s',data:{{ net_out|safe }},borderColor:'#f97316'}]}});
-new Chart(document.getElementById('processChart'), {type:'bar', data:{labels:{{ process_labels|safe }},datasets:[{label:'CPU %',data:{{ process_values|safe }},backgroundColor:'#8b5cf6'}]}});
-new Chart(document.getElementById('severityChart'), {type:'pie', data:{labels:['INFO','WARN','ERROR'],datasets:[{data:{{ severity_values|safe }},backgroundColor:['#0ea5e9','#f59e0b','#ef4444']}]}});
+new Chart(document.getElementById('networkChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'In',data:{{ net_in|safe }},borderColor:'#16a34a'},{label:'Out',data:{{ net_out|safe }},borderColor:'#f97316'}]}});
 </script>
 {% endblock %}

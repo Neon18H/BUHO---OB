@@ -19,6 +19,13 @@ def badge_class(value):
         'INFO': 'info',
         'WARN': 'warning',
         'ERROR': 'danger',
+        'OPEN': 'danger',
+        'ACKED': 'warning',
+        'RESOLVED': 'success',
+        'LOW': 'info',
+        'MEDIUM': 'warning',
+        'HIGH': 'danger',
+        'CRITICAL': 'dark',
 
         'ONLINE': 'success',
         'OFFLINE': 'danger',

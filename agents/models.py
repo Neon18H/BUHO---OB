@@ -1,7 +1,7 @@
-import hashlib
 import secrets
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import models
 from django.utils import timezone
 
@@ -57,20 +57,21 @@ class Agent(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OFFLINE)
     last_seen = models.DateTimeField(null=True, blank=True)
     enrolled_at = models.DateTimeField(default=timezone.now)
-    agent_key_hash = models.CharField(max_length=128, blank=True)
+    agent_key_hash = models.CharField(max_length=256, blank=True)
 
     class Meta:
         ordering = ('name',)
+        unique_together = ('organization', 'hostname')
 
     def __str__(self):
         return self.name
 
     @staticmethod
     def hash_agent_key(raw_key: str):
-        return hashlib.sha256(raw_key.encode()).hexdigest()
+        return make_password(raw_key)
 
     def verify_key(self, raw_key: str):
-        return self.agent_key_hash == self.hash_agent_key(raw_key)
+        return check_password(raw_key, self.agent_key_hash)
 
 
 class AgentHeartbeat(models.Model):
@@ -81,6 +82,85 @@ class AgentHeartbeat(models.Model):
 
     class Meta:
         ordering = ('-ts',)
+
+
+class MetricPoint(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='metric_points')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='metric_points')
+    name = models.CharField(max_length=120)
+    value = models.FloatField()
+    unit = models.CharField(max_length=32, blank=True)
+    ts = models.DateTimeField(default=timezone.now)
+    labels_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-ts',)
+        indexes = [models.Index(fields=['organization', 'agent', 'name', 'ts'])]
+
+
+class ProcessSample(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='process_samples')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='process_samples')
+    pid = models.IntegerField()
+    name = models.CharField(max_length=255)
+    cpu = models.FloatField(default=0.0)
+    mem = models.FloatField(default=0.0)
+    user = models.CharField(max_length=255, blank=True)
+    cmdline_redacted = models.TextField(blank=True)
+    ts = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ('-ts',)
+        indexes = [models.Index(fields=['organization', 'agent', 'ts'])]
+
+
+class LogEntry(models.Model):
+    class Level(models.TextChoices):
+        INFO = 'INFO', 'Info'
+        WARN = 'WARN', 'Warn'
+        ERROR = 'ERROR', 'Error'
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='log_entries')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='log_entries')
+    level = models.CharField(max_length=16, choices=Level.choices, default=Level.INFO)
+    source = models.CharField(max_length=120, default='agent')
+    message = models.TextField()
+    ts = models.DateTimeField(default=timezone.now)
+    fields_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-ts',)
+        indexes = [models.Index(fields=['organization', 'agent', 'level', 'ts'])]
+
+
+class Incident(models.Model):
+    class Type(models.TextChoices):
+        CPU_SPIKE = 'CPU_SPIKE', 'CPU > 90% (3 samples)'
+        DISK_CRITICAL = 'DISK_CRITICAL', 'Disk root > 90%'
+        LOG_ERROR_FLOOD = 'LOG_ERROR_FLOOD', 'Error logs flood'
+
+    class Severity(models.TextChoices):
+        LOW = 'LOW', 'Low'
+        MEDIUM = 'MEDIUM', 'Medium'
+        HIGH = 'HIGH', 'High'
+        CRITICAL = 'CRITICAL', 'Critical'
+
+    class Status(models.TextChoices):
+        OPEN = 'OPEN', 'Open'
+        ACKED = 'ACKED', 'Acked'
+        RESOLVED = 'RESOLVED', 'Resolved'
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='incidents')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='incidents', null=True, blank=True)
+    type = models.CharField(max_length=32, choices=Type.choices)
+    severity = models.CharField(max_length=16, choices=Severity.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    started_at = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+    context_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-last_seen',)
 
 
 class AgentDownload(models.Model):
