@@ -43,3 +43,8 @@ Incluye:
 - Modelo `Agent`
 - Modelo `AgentEnrollmentToken`
 - Auditoría de `CREATE_TOKEN` / `REVOKE_TOKEN` / `VIEW_AGENT` / `VIEW_TOKENS`
+
+## Notas de despliegue del instalador de agentes
+
+- Los scripts servidos por Buho (`/agents/download/agent.py` y `/agents/download/windows.ps1`) se generan desde backend en cada request.
+- Después de cambiar la lógica de generación en Django, reinicia el servidor (`python manage.py runserver`) para asegurarte de servir la versión actualizada del instalador.
