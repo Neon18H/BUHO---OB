@@ -1,0 +1,18 @@
+{% extends 'ui/base.html' %}
+{% load ui_tags %}
+{% block content %}
+<h1 class="h4 mb-3">Logs Explorer (Demo)</h1>
+<form class="row g-2 mb-3" method="get">
+    <div class="col-md-2">
+        <select class="form-select" name="level">
+            <option value="">All levels</option>
+            {% for lvl in 'INFO,WARN,ERROR'.split(',') %}<option value="{{ lvl }}" {% if level_filter == lvl %}selected{% endif %}>{{ lvl }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="col-md-6"><input type="text" class="form-control" name="q" value="{{ search }}" placeholder="Search text or source"></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div>
+</form>
+<div class="card"><div class="table-responsive"><table class="table table-striped mb-0"><thead><tr><th>Timestamp</th><th>Source</th><th>Level</th><th>Message</th></tr></thead><tbody>
+{% for log in logs %}<tr><td>{{ log.timestamp }}</td><td>{{ log.source }}</td><td><span class="badge text-bg-{{ log.level|badge_class }}">{{ log.level }}</span></td><td>{{ log.message }}</td></tr>{% empty %}<tr><td colspan="4">No logs match your query.</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}

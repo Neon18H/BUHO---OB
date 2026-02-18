@@ -1,0 +1,8 @@
+{% extends 'ui/base.html' %}
+{% block content %}
+<h1 class="h4 mb-3">Applications</h1>
+<div class="card"><div class="table-responsive"><table class="table mb-0">
+<thead><tr><th>Name</th><th>Version</th><th>Host</th><th>Status</th></tr></thead>
+<tbody>{% for app in apps %}<tr><td>{{ app.name }}</td><td>{{ app.version }}</td><td>{{ app.host }}</td><td>{{ app.status }}</td></tr>{% endfor %}</tbody>
+</table></div></div>
+{% endblock %}

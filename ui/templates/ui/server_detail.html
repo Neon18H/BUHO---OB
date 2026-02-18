@@ -1,0 +1,13 @@
+{% extends 'ui/base.html' %}
+{% block content %}
+<h1 class="h4">{{ server.hostname }} <small class="text-muted">{{ server.ip }}</small></h1>
+<ul class="nav nav-tabs mt-3 mb-3">
+  <li class="nav-item"><a class="nav-link active" href="#">Overview</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Metrics</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Processes</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Apps</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Logs</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Alerts</a></li>
+</ul>
+<div class="card"><div class="card-body">Placeholder details for server telemetry in future phases.</div></div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends 'ui/base.html' %}
+{% load ui_tags %}
+{% block content %}
+<h1 class="h4 mb-3">Servers</h1>
+<div class="card"><div class="table-responsive"><table class="table table-hover mb-0">
+<thead><tr><th>Hostname</th><th>IP</th><th>OS</th><th>Status</th><th>Last seen</th><th></th></tr></thead>
+<tbody>
+{% for server in servers %}
+<tr>
+<td>{{ server.hostname }}</td><td>{{ server.ip }}</td><td>{{ server.os }}</td>
+<td><span class="badge text-bg-{{ server.status|badge_class }}">{{ server.status }}</span></td>
+<td>{{ server.last_seen }}</td><td><a href="{% url 'ui:server_detail' server.id %}" class="btn btn-sm btn-outline-primary">View</a></td>
+</tr>
+{% endfor %}
+</tbody></table></div></div>
+{% endblock %}
