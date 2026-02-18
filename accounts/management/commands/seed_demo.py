@@ -4,8 +4,9 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from accounts.models import Organization, User
-from agents.models import Agent, AgentEnrollmentToken
+from agents.models import Agent, AgentEnrollmentToken, AgentHeartbeat
 from audit.models import AuditLog
+from dashboards.models import Dashboard, DashboardWidget
 
 
 class Command(BaseCommand):
@@ -44,18 +45,22 @@ class Command(BaseCommand):
             ('VPS-LEGACY-01', 'vps-legacy-01.local', '10.10.0.31', Agent.Status.OFFLINE, timezone.now() - timedelta(days=2)),
         ]
         for name, hostname, ip, status, last_seen in agents:
-            Agent.objects.get_or_create(
+            agent, _ = Agent.objects.get_or_create(
                 organization=org,
-                name=name,
+                hostname=hostname,
                 defaults={
-                    'hostname': hostname,
+                    'name': name,
                     'ip_address': ip,
                     'os': 'Ubuntu 22.04 LTS' if 'LEGACY' not in name else 'CentOS 7',
                     'version': '1.0.0-demo',
                     'status': status,
                     'last_seen': last_seen,
+                    'arch': 'x86_64',
+                    'agent_key_hash': Agent.hash_agent_key('demo-key'),
                 },
             )
+            for idx in range(3):
+                AgentHeartbeat.objects.get_or_create(agent=agent, ts=timezone.now() - timedelta(minutes=idx * 5), defaults={'status': status, 'metadata_json': {'demo': True, 'seq': idx}})
 
         if AgentEnrollmentToken.objects.count() < 2:
             AgentEnrollmentToken.objects.get_or_create(
@@ -65,6 +70,8 @@ class Command(BaseCommand):
                     'expires_at': timezone.now() + timedelta(days=7),
                     'is_used': False,
                     'created_by': orgadmin,
+                    'server_name_optional': 'seed-linux-01',
+                    'tags_json': ['seed', 'linux'],
                 },
             )
             AgentEnrollmentToken.objects.get_or_create(
@@ -74,8 +81,13 @@ class Command(BaseCommand):
                     'expires_at': timezone.now() - timedelta(hours=1),
                     'is_used': True,
                     'created_by': orgadmin,
+                    'server_name_optional': 'expired-seed',
+                    'tags_json': ['seed'],
                 },
             )
+
+        dashboard, _ = Dashboard.objects.get_or_create(organization=org, name='Default', defaults={'created_by': orgadmin, 'is_default': True})
+        DashboardWidget.objects.get_or_create(dashboard=dashboard, title='CPU KPI', type='KPI', defaults={'config_json': {'metric': 'cpu'}, 'position_json': {'x': 0, 'y': 0}})
 
         if AuditLog.objects.count() < 20:
             for idx in range(1, 21):

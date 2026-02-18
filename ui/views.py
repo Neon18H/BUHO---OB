@@ -1,6 +1,8 @@
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.views import LoginView, LogoutView
+import json
+
 from django.db.models import Q
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
@@ -13,6 +15,7 @@ from audit.models import AuditLog
 from audit.utils import create_audit_log
 from .demo_data import get_alerts, get_apps, get_logs, get_servers
 from agents.models import Agent
+from dashboards.models import Dashboard, DashboardWidget
 from .permissions import RoleRequiredMixin
 
 User = get_user_model()
@@ -50,22 +53,75 @@ class OrganizationSwitchView(RoleRequiredMixin, View):
 class OverviewView(RoleRequiredMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
+    def get_org(self, request):
+        if request.user.role == 'SUPERADMIN':
+            org_id = request.session.get('active_org_id')
+            if org_id:
+                return Organization.objects.filter(id=org_id).first()
+            return Organization.objects.first()
+        return request.user.organization
+
     def get(self, request):
-        logs = AuditLog.objects.all()
-        if request.user.role != 'SUPERADMIN':
-            logs = logs.filter(Q(organization=request.user.organization) | Q(organization__isnull=True))
+        org = self.get_org(request)
+        dashboard = Dashboard.objects.filter(organization=org, is_default=True).first() if org else None
+        widgets = dashboard.widgets.all() if dashboard else []
         context = {
-            'kpis': {
-                'agents_online': Agent.objects.filter(status='ONLINE').count(),
-                'active_alerts': 6,
-                'errors_24h': 132,
-                'monitored_servers': Agent.objects.count() or 24,
-            },
-            'events': logs[:10],
-            'chart_labels': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-            'chart_values': [12, 19, 8, 15, 21, 17, 14],
+            'kpi_cards': [
+                {'title': 'Servidores monitoreados', 'value': 24, 'icon': 'bi-hdd-network'},
+                {'title': 'Agentes Online/Offline/Degraded', 'value': f"{Agent.objects.filter(status='ONLINE').count()}/{Agent.objects.filter(status='OFFLINE').count()}/{Agent.objects.filter(status='DEGRADED').count()}", 'icon': 'bi-robot'},
+                {'title': 'CPU Avg (15m)', 'value': '42%', 'icon': 'bi-cpu'},
+                {'title': 'RAM Avg (15m)', 'value': '63%', 'icon': 'bi-memory'},
+                {'title': 'Disk Used % (worst)', 'value': '88%', 'icon': 'bi-device-hdd'},
+                {'title': 'Network In/Out', 'value': '120MB/s · 80MB/s', 'icon': 'bi-diagram-3'},
+                {'title': 'Error rate (1h)', 'value': '2.8%', 'icon': 'bi-bug'},
+                {'title': 'Alertas activas', 'value': 7, 'icon': 'bi-bell'},
+                {'title': 'Uptime promedio', 'value': '99.92%', 'icon': 'bi-clock-history'},
+                {'title': 'Load average', 'value': '1.28', 'icon': 'bi-speedometer2'},
+            ],
+            'cpu_labels': ['-15m','-12m','-9m','-6m','-3m','Ahora'],
+            'cpu_values': [34, 45, 38, 55, 48, 42],
+            'ram_values': [58, 60, 62, 63, 64, 63],
+            'net_in': [80, 110, 95, 140, 100, 120],
+            'net_out': [60, 70, 68, 77, 84, 80],
+            'process_labels': ['python','postgres','nginx','redis','celery'],
+            'process_values': [55, 48, 35, 30, 22],
+            'severity_values': [520, 90, 30],
+            'top_endpoints': [
+                {'endpoint': '/api/orders', 'errors': 21, 'p95': '520ms'},
+                {'endpoint': '/api/auth/login', 'errors': 13, 'p95': '410ms'},
+                {'endpoint': '/api/checkout', 'errors': 9, 'p95': '610ms'},
+            ],
+            'widgets': widgets,
         }
         return render(request, 'ui/overview.html', context)
+
+
+class WidgetCreateView(RoleRequiredMixin, View):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST'}
+
+    def post(self, request):
+        if request.user.role == 'SUPERADMIN':
+            org = Organization.objects.filter(id=request.session.get('active_org_id')).first() or Organization.objects.first()
+        else:
+            org = request.user.organization
+        if not org:
+            messages.error(request, 'No organization selected.')
+            return redirect('ui:overview')
+        dashboard, _ = Dashboard.objects.get_or_create(organization=org, name='Default', defaults={'created_by': request.user, 'is_default': True})
+        config_raw = request.POST.get('config_json', '{}').strip() or '{}'
+        try:
+            config_json = json.loads(config_raw)
+        except json.JSONDecodeError:
+            config_json = {'raw': config_raw}
+        DashboardWidget.objects.create(
+            dashboard=dashboard,
+            type=request.POST.get('type', 'KPI'),
+            title=request.POST.get('title', 'Nuevo widget'),
+            config_json=config_json,
+            position_json={},
+        )
+        messages.success(request, 'Widget agregado al dashboard.')
+        return redirect('ui:overview')
 
 
 class ServersListView(RoleRequiredMixin, View):

@@ -1,0 +1,9 @@
+<div class="card h-100">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>{{ title }}</strong>
+    {% if subtitle %}<span class="text-body-secondary small">{{ subtitle }}</span>{% endif %}
+  </div>
+  <div class="card-body">
+    <canvas id="{{ chart_id }}" height="{{ height|default:'100' }}"></canvas>
+  </div>
+</div>

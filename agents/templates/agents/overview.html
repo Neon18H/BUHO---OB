@@ -1,0 +1,42 @@
+{% extends 'ui/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Agentes</h1>
+    <p class="text-body-secondary mb-0">Centro de control de enrollment y salud del agente.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{% url 'agents:install' %}" class="btn btn-primary"><i class="bi bi-plug"></i> Instalar agente</a>
+    {% if can_manage_tokens %}<a href="{% url 'agents:tokens' %}" class="btn btn-outline-secondary">Tokens</a>{% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">{% include 'ui/components/kpi_card.html' with icon='bi-wifi' title='Online' value=online_count variant='success' %}</div>
+  <div class="col-md-4">{% include 'ui/components/kpi_card.html' with icon='bi-wifi-off' title='Offline' value=offline_count variant='danger' %}</div>
+  <div class="col-md-4">{% include 'ui/components/kpi_card.html' with icon='bi-exclamation-triangle' title='Degraded' value=degraded_count variant='warning' %}</div>
+</div>
+
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Nombre</th><th>Host</th><th>IP</th><th>Estado</th><th>Last seen</th><th>Versión</th><th></th></tr></thead>
+      <tbody>
+        {% for agent in agents %}
+        <tr>
+          <td>{{ agent.name }}</td>
+          <td>{{ agent.hostname }}</td>
+          <td>{{ agent.ip_address }}</td>
+          <td><span class="badge rounded-pill bg-{% if agent.status == 'ONLINE' %}success{% elif agent.status == 'DEGRADED' %}warning{% else %}danger{% endif %}-subtle text-{% if agent.status == 'ONLINE' %}success{% elif agent.status == 'DEGRADED' %}warning{% else %}danger{% endif %}-emphasis">{{ agent.get_status_display }}</span></td>
+          <td>{{ agent.last_seen|date:'Y-m-d H:i'|default:'-' }}</td>
+          <td>{{ agent.version }}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{% url 'agents:detail' agent.id %}">Ver detalle</a></td>
+        </tr>
+        {% empty %}
+          <tr><td colspan="7">{% include 'ui/components/empty_state.html' with title='Sin agentes aún' body='Genera un token e instala el agente para comenzar.' icon='bi-robot' %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
