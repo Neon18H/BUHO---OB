@@ -1,7 +1,11 @@
 {% extends 'ui/base.html' %}
+{% load ui_tags %}
 {% block content %}
-<h1 class="h4">{{ server.hostname }} <small class="text-muted">{{ server.ip }}</small></h1>
-<ul class="nav nav-tabs mt-3 mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">{{ server.hostname }}</h1>
+  <span class="badge text-bg-{{ server.status|badge_class }}">{{ server.status }}</span>
+</div>
+<ul class="nav nav-tabs mb-3">
   <li class="nav-item"><a class="nav-link active" href="#">Overview</a></li>
   <li class="nav-item"><a class="nav-link" href="#">Metrics</a></li>
   <li class="nav-item"><a class="nav-link" href="#">Processes</a></li>
@@ -9,5 +13,11 @@
   <li class="nav-item"><a class="nav-link" href="#">Logs</a></li>
   <li class="nav-item"><a class="nav-link" href="#">Alerts</a></li>
 </ul>
-<div class="card"><div class="card-body">Placeholder details for server telemetry in future phases.</div></div>
+<div class="card"><div class="card-body">
+  <div class="row g-3">
+    <div class="col-md-4"><strong>IP:</strong> {{ server.ip }}</div>
+    <div class="col-md-4"><strong>OS:</strong> {{ server.os }}</div>
+    <div class="col-md-4"><strong>Last seen:</strong> {{ server.last_seen|date:'Y-m-d H:i' }}</div>
+  </div>
+</div></div>
 {% endblock %}

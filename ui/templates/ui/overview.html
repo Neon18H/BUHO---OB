@@ -1,30 +1,42 @@
 {% extends 'ui/base.html' %}
 
 {% block content %}
-<nav aria-label="breadcrumb">
-  <ol class="breadcrumb">
-    <li class="breadcrumb-item active">Overview</li>
-  </ol>
-</nav>
-<div class="row g-3 mb-4">
-  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Agentes online</h6><h3>{{ kpis.agents_online }}</h3></div></div></div>
-  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Alertas activas</h6><h3>{{ kpis.active_alerts }}</h3></div></div></div>
-  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Errores últimas 24h</h6><h3>{{ kpis.errors_24h }}</h3></div></div></div>
-  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Servidores monitoreados</h6><h3>{{ kpis.monitored_servers }}</h3></div></div></div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0">Overview</h1>
+    <small class="text-body-secondary">Panel general de salud y actividad</small>
+  </div>
 </div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Agents online' value=kpis.agents_online icon='bi-robot' %}</div>
+  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Active alerts' value=kpis.active_alerts icon='bi-bell-fill' %}</div>
+  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Errors (24h)' value=kpis.errors_24h icon='bi-exclamation-triangle' %}</div>
+  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Monitored servers' value=kpis.monitored_servers icon='bi-hdd-stack' %}</div>
+</div>
+
 <div class="row g-3">
-    <div class="col-lg-8">
-        <div class="card"><div class="card-body"><h5>Tendencia demo</h5><canvas id="trendChart" height="100"></canvas></div></div>
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-header"><strong>Health trend</strong></div>
+      <div class="card-body"><canvas id="trendChart" height="90"></canvas></div>
     </div>
-    <div class="col-lg-4">
-        <div class="card"><div class="card-body"><h5>Últimos eventos (AuditLog)</h5>
-            <ul class="list-group list-group-flush">
-            {% for event in events %}
-                <li class="list-group-item px-0"><small class="text-muted">{{ event.created_at }}</small><br>{{ event.action }} - {{ event.target_type }} {{ event.target_id|default:'' }}</li>
-            {% empty %}<li class="list-group-item px-0">No events yet.</li>{% endfor %}
-            </ul>
-        </div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header"><strong>Latest audit events</strong></div>
+      <ul class="list-group list-group-flush">
+      {% for event in events %}
+        <li class="list-group-item">
+          <div class="small text-body-secondary">{{ event.created_at|date:'Y-m-d H:i' }}</div>
+          <div>{{ event.action }} · {{ event.target_type }} {{ event.target_id|default:'' }}</div>
+        </li>
+      {% empty %}
+        <li class="list-group-item text-body-secondary">No hay eventos.</li>
+      {% endfor %}
+      </ul>
     </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -32,7 +44,11 @@
 <script>
 new Chart(document.getElementById('trendChart'), {
     type: 'line',
-    data: {labels: {{ chart_labels|safe }}, datasets: [{label: 'Eventos', data: {{ chart_values|safe }}, borderColor: '#0d6efd'}]},
+    data: {
+      labels: {{ chart_labels|safe }},
+      datasets: [{label: 'Health score', data: {{ chart_values|safe }}, borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,.2)', fill: true, tension: 0.35}]
+    },
+    options: {plugins: {legend: {display: false}}}
 });
 </script>
 {% endblock %}

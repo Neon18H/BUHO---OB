@@ -1,0 +1,20 @@
+{% extends 'ui/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">{{ agent.name }}</h1>
+  <span class="badge text-bg-primary">{{ agent.get_status_display }}</span>
+</div>
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><a class="nav-link active" href="#">Overview</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Metrics</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Processes</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Logs</a></li>
+  <li class="nav-item"><a class="nav-link" href="#">Alerts</a></li>
+</ul>
+<div class="row g-3">
+  <div class="col-lg-4"><div class="card"><div class="card-body"><div class="small text-body-secondary">Hostname</div><strong>{{ agent.hostname }}</strong></div></div></div>
+  <div class="col-lg-4"><div class="card"><div class="card-body"><div class="small text-body-secondary">IP Address</div><strong>{{ agent.ip_address }}</strong></div></div></div>
+  <div class="col-lg-4"><div class="card"><div class="card-body"><div class="small text-body-secondary">Version</div><strong>{{ agent.version }}</strong></div></div></div>
+</div>
+<div class="card mt-3"><div class="card-body text-body-secondary">Placeholders funcionales para métricas, procesos, logs y alertas por agente en próximas fases.</div></div>
+{% endblock %}

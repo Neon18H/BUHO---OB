@@ -1,16 +1,28 @@
-<div class="bg-dark text-white p-3" style="min-height:100vh; width:250px;">
-    <h2 class="h5">🦉 Buho</h2>
-    <div class="small text-secondary mb-3">Observability MVP</div>
-    <div class="nav flex-column nav-pills gap-1">
-        <a class="nav-link text-white" href="{% url 'ui:overview' %}">Overview</a>
-        <a class="nav-link text-white" href="{% url 'ui:servers' %}">Servers</a>
-        <a class="nav-link text-white" href="{% url 'ui:apps' %}">Apps</a>
+<div class="app-sidebar" id="appSidebar">
+    <div class="brand">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="16" cy="16" r="16" fill="var(--buho-brand)"/>
+            <path d="M9 19c0-4 3-7 7-7s7 3 7 7" stroke="white" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="13" cy="16" r="2" fill="white"/><circle cx="19" cy="16" r="2" fill="white"/>
+            <path d="M16 18v4" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div>
+            <strong>Buho</strong>
+            <div class="small text-body-secondary">Observabilidad</div>
+        </div>
+    </div>
+
+    <nav class="nav flex-column nav-pills gap-1 mt-3">
+        <a class="nav-link {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'ui:overview' %}"><i class="bi bi-speedometer2"></i><span>Overview</span></a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'servers' %}active{% endif %}" href="{% url 'ui:servers' %}"><i class="bi bi-hdd-stack"></i><span>Servers</span></a>
+        <a class="nav-link {% if request.resolver_match.namespace == 'agents' %}active{% endif %}" href="{% url 'agents:list' %}"><i class="bi bi-robot"></i><span>Agents</span></a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'apps' %}active{% endif %}" href="{% url 'ui:apps' %}"><i class="bi bi-grid"></i><span>Apps</span></a>
         {% if request.user.role != 'VIEWER' %}
-        <a class="nav-link text-white" href="{% url 'ui:logs' %}">Logs</a>
-        <a class="nav-link text-white" href="{% url 'ui:alerts' %}">Alerts</a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'logs' %}active{% endif %}" href="{% url 'ui:logs' %}"><i class="bi bi-file-earmark-text"></i><span>Logs</span></a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'alerts' %}active{% endif %}" href="{% url 'ui:alerts' %}"><i class="bi bi-bell"></i><span>Alerts</span></a>
         {% endif %}
         {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}
-        <a class="nav-link text-white" href="{% url 'ui:settings' %}">Settings</a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'settings' %}active{% endif %}" href="{% url 'ui:settings' %}"><i class="bi bi-gear"></i><span>Settings</span></a>
         {% endif %}
-    </div>
+    </nav>
 </div>

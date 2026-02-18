@@ -1,58 +1,39 @@
 {% extends 'ui/base.html' %}
+{% load ui_tags %}
 {% block content %}
 <h1 class="h4 mb-3">Settings</h1>
-<div class="row g-4">
-  <div class="col-lg-7">
-    <div class="card"><div class="card-header">Users</div><div class="card-body p-0">
-      <table class="table mb-0">
-        <thead><tr><th>Username</th><th>Role</th><th>Organization</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>
-        {% for user in users %}
-          <tr>
-            <td>{{ user.username }}</td><td>{{ user.role }}</td><td>{{ user.organization|default:'-' }}</td><td>{% if user.is_active %}Active{% else %}Inactive{% endif %}</td>
-            <td>
-              <form method="post" action="{% url 'ui:user_update' user.id %}" class="d-flex gap-1 mb-1">
-                {% csrf_token %}
-                <select name="role" class="form-select form-select-sm">
-                  {% for value,label in user.Role.choices %}<option value="{{ value }}" {% if user.role == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                </select>
-                <input type="hidden" name="email" value="{{ user.email }}">
-                <input type="hidden" name="first_name" value="{{ user.first_name }}">
-                <input type="hidden" name="last_name" value="{{ user.last_name }}">
-                <input type="hidden" name="organization" value="{{ user.organization_id }}">
-                <input type="hidden" name="is_active" value="{{ user.is_active|yesno:'on,' }}">
-                <button class="btn btn-sm btn-outline-primary">Save</button>
-              </form>
-              {% if user.is_active %}
-              <form method="post" action="{% url 'ui:user_deactivate' user.id %}">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Deactivate</button></form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div></div>
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card table-card">
+      <div class="card-header"><strong>Users</strong></div>
+      <div class="table-responsive sticky-table">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>User</th><th>Role</th><th>Organization</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+          {% for user in users %}
+            <tr>
+              <td>{{ user.username }}</td>
+              <td><span class="badge text-bg-primary-subtle text-primary-emphasis">{{ user.get_role_display }}</span></td>
+              <td>{{ user.organization|default:'-' }}</td>
+              <td>{% if user.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Inactive</span>{% endif %}</td>
+              <td>
+                <form method="post" action="{% url 'ui:user_update' user.id %}" class="d-flex gap-2">
+                  {% csrf_token %}
+                  <select name="role" class="form-select form-select-sm">{% for value,label in user.Role.choices %}<option value="{{ value }}" {% if user.role == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                  <input type="hidden" name="email" value="{{ user.email }}"><input type="hidden" name="first_name" value="{{ user.first_name }}"><input type="hidden" name="last_name" value="{{ user.last_name }}"><input type="hidden" name="organization" value="{{ user.organization_id }}"><input type="hidden" name="is_active" value="{{ user.is_active|yesno:'on,' }}">
+                  <button class="btn btn-sm btn-outline-primary">Save</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
-  <div class="col-lg-5">
-    <div class="card mb-3"><div class="card-header">Create user</div><div class="card-body">
-      <form method="post" action="{% url 'ui:user_create' %}">
-        {% csrf_token %}
-        {{ create_form.as_p }}
-        <button class="btn btn-primary">Create</button>
-      </form>
-    </div></div>
-    <div class="card"><div class="card-header">Organization config</div><div class="card-body">
-      {% for org in organizations %}
-      <form method="post" action="{% url 'ui:organization_update' org.id %}" class="mb-3">
-        {% csrf_token %}
-        <input class="form-control mb-2" name="name" value="{{ org.name }}">
-        <select class="form-select mb-2" name="plan">
-          {% for value,label in org.Plan.choices %}<option value="{{ value }}" {% if org.plan == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-        </select>
-        <button class="btn btn-outline-primary">Update</button>
-      </form>
-      {% endfor %}
-    </div></div>
+  <div class="col-lg-4">
+    <div class="card mb-3"><div class="card-header"><strong>Create user</strong></div><div class="card-body"><form method="post" action="{% url 'ui:user_create' %}">{% csrf_token %}{{ create_form.as_p }}<button class="btn btn-primary">Create user</button></form></div></div>
+    <div class="card"><div class="card-header"><strong>Organization config</strong></div><div class="card-body">{% for org in organizations %}<form method="post" action="{% url 'ui:organization_update' org.id %}" class="mb-3">{% csrf_token %}<label class="form-label">Name</label><input class="form-control mb-2" name="name" value="{{ org.name }}"><label class="form-label">Plan</label><select class="form-select mb-2" name="plan">{% for value,label in org.Plan.choices %}<option value="{{ value }}" {% if org.plan == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="btn btn-outline-primary">Save changes</button></form>{% endfor %}</div></div>
   </div>
 </div>
 {% endblock %}

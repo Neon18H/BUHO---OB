@@ -1,0 +1,68 @@
+:root {
+    --buho-brand: #4f46e5;
+    --buho-brand-2: #0ea5e9;
+    --buho-bg: #f5f7fb;
+    --buho-card: #ffffff;
+    --buho-text: #111827;
+    --buho-border: #e5e7eb;
+}
+
+:root[data-theme='dark'] {
+    --buho-bg: #0f172a;
+    --buho-card: #111827;
+    --buho-text: #e5e7eb;
+    --buho-border: #1f2937;
+}
+
+body {
+    background: var(--buho-bg);
+    color: var(--buho-text);
+}
+
+.app-shell { display: flex; min-height: 100vh; }
+.app-sidebar {
+    width: 250px;
+    border-right: 1px solid var(--buho-border);
+    background: var(--buho-card);
+    padding: 1rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    transition: all .2s ease;
+}
+.app-sidebar.collapsed { width: 88px; }
+.app-sidebar.collapsed .nav-link span,
+.app-sidebar.collapsed .brand div { display: none; }
+.brand { display: flex; align-items: center; gap: .75rem; }
+.app-sidebar .nav-link { color: inherit; display: flex; gap: .65rem; align-items: center; }
+.app-sidebar .nav-link.active { background: linear-gradient(90deg, var(--buho-brand), var(--buho-brand-2)); color: #fff; }
+
+.app-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+    background: var(--buho-card);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: .75rem 1.25rem;
+}
+.search-box { min-width: 260px; }
+.content-wrap { padding: 1.25rem; }
+.app-footer {
+    margin-top: auto;
+    border-top: 1px solid var(--buho-border);
+    padding: .75rem 1.25rem;
+    color: #6b7280;
+    background: var(--buho-card);
+}
+
+.card { border: 1px solid var(--buho-border); background: var(--buho-card); }
+.kpi-card .kpi-icon { font-size: 1.6rem; color: var(--buho-brand); }
+.table-card .card-header { background: transparent; border-bottom: 1px solid var(--buho-border); }
+.sticky-table thead th { position: sticky; top: 0; z-index: 2; background: var(--buho-card); }
+
+.status-dot { width: .55rem; height: .55rem; border-radius: 50%; display: inline-block; margin-right: .35rem; }
+.status-online { background: #10b981; }
+.status-offline { background: #ef4444; }
+.status-degraded { background: #f59e0b; }
+.empty-state { padding: 2rem; text-align: center; border: 1px dashed var(--buho-border); border-radius: .75rem; }
+.user-pill { display: inline-flex; align-items: center; gap: .35rem; }

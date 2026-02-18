@@ -1,21 +1,29 @@
-<nav class="navbar navbar-expand-lg bg-white border-bottom px-4">
-    <div class="container-fluid p-0">
-        <span class="navbar-brand mb-0 h1">Dashboard</span>
-        <div class="d-flex align-items-center gap-3">
-            {% if request.user.role == 'SUPERADMIN' %}
-            <form method="post" action="{% url 'accounts:switch_organization' %}">
-                {% csrf_token %}
-                <select class="form-select form-select-sm" name="organization_id" onchange="this.form.submit()">
-                    <option value="">All organizations</option>
-                    {% for org in all_orgs %}
-                    <option value="{{ org.id }}" {% if active_org and active_org.id == org.id %}selected{% endif %}>{{ org.name }}</option>
-                    {% endfor %}
-                </select>
-            </form>
-            {% endif %}
-            <span class="badge text-bg-secondary">{{ request.user.get_role_display }}</span>
-            <span>{{ request.user.username }}</span>
-            <a class="btn btn-outline-danger btn-sm" href="{% url 'accounts:logout' %}">Logout</a>
+<nav class="topbar border-bottom">
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('appSidebar').classList.toggle('collapsed')"><i class="bi bi-list"></i></button>
+        <div class="input-group input-group-sm search-box">
+            <span class="input-group-text bg-body"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" placeholder="Buscar eventos, hosts, apps..." disabled>
         </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        {% if request.user.role == 'SUPERADMIN' %}
+        <form method="post" action="{% url 'accounts:switch_organization' %}" class="d-flex">
+            {% csrf_token %}
+            <select class="form-select form-select-sm" name="organization_id" onchange="this.form.submit()">
+                <option value="">All organizations</option>
+                {% for org in all_orgs %}
+                <option value="{{ org.id }}" {% if active_org and active_org.id == org.id %}selected{% endif %}>{{ org.name }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        {% endif %}
+        <button class="btn btn-sm btn-outline-secondary" onclick="toggleTheme()"><i class="bi bi-moon-stars"></i></button>
+        <span class="badge text-bg-primary-subtle text-primary-emphasis">{{ request.user.get_role_display }}</span>
+        <div class="user-pill">
+            <i class="bi bi-person-circle"></i>
+            <span>{{ request.user.username }}</span>
+        </div>
+        <a class="btn btn-sm btn-outline-danger" href="{% url 'accounts:logout' %}">Logout</a>
     </div>
 </nav>

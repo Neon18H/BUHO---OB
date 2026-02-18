@@ -43,7 +43,7 @@ def get_logs():
                 'timestamp': base - timedelta(minutes=idx * 3),
                 'source': f'app-node-{(idx % 8) + 1:02d}',
                 'level': level,
-                'message': f'Event {idx}: simulated {level.lower()} message for dashboard testing.',
+                'message': f'Event {idx}: simulated {level.lower()} message for agent VPS-DEV-01 dashboard testing.',
             }
         )
     return entries
@@ -51,7 +51,7 @@ def get_logs():
 
 def get_alerts():
     return [
-        {'id': 1, 'title': 'CPU spike on app-node-03', 'severity': 'High', 'status': 'Open'},
+        {'id': 1, 'title': 'CPU spike on app-node-03 (agent VPS-DEV-01)', 'severity': 'High', 'status': 'Open'},
         {'id': 2, 'title': 'Disk usage > 90% on db-node-01', 'severity': 'Critical', 'status': 'Ack'},
         {'id': 3, 'title': 'Service restart detected', 'severity': 'Medium', 'status': 'Resolved'},
     ]

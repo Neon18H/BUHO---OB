@@ -1,0 +1,47 @@
+{% extends 'ui/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0">Agents</h1>
+    <small class="text-body-secondary">Estado de agentes instalados (demo)</small>
+  </div>
+  {% if can_manage_tokens %}
+    <a href="{% url 'agents:tokens' %}" class="btn btn-primary btn-sm"><i class="bi bi-key"></i> Crear token de instalación</a>
+  {% endif %}
+</div>
+
+{% if agents %}
+<div class="card table-card">
+  <div class="table-responsive sticky-table">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Name</th><th>Hostname</th><th>IP</th><th>Status</th><th>Last Seen</th><th>OS</th><th>Version</th><th></th></tr></thead>
+      <tbody>
+      {% for agent in agents %}
+      <tr>
+        <td>{{ agent.name }}</td>
+        <td>{{ agent.hostname }}</td>
+        <td>{{ agent.ip_address }}</td>
+        <td>
+          {% if agent.status == 'ONLINE' %}<span class="status-dot status-online"></span><span class="badge text-bg-success">Online</span>
+          {% elif agent.status == 'DEGRADED' %}<span class="status-dot status-degraded"></span><span class="badge text-bg-warning">Degraded</span>
+          {% else %}<span class="status-dot status-offline"></span><span class="badge text-bg-danger">Offline</span>{% endif %}
+        </td>
+        <td>{{ agent.last_seen|date:'Y-m-d H:i' }}</td>
+        <td>{{ agent.os }}</td>
+        <td>{{ agent.version }}</td>
+        <td><a class="btn btn-sm btn-outline-primary" href="{% url 'agents:detail' agent.id %}">Ver detalle</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">
+  <i class="bi bi-robot fs-1 text-body-secondary"></i>
+  <h5 class="mt-2">No hay agentes aún</h5>
+  <p class="text-body-secondary">Crea un token de instalación para enrolar tu primer agente.</p>
+  {% if can_manage_tokens %}<a href="{% url 'agents:tokens' %}" class="btn btn-primary">Ir a tokens</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

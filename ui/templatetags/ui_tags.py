@@ -19,5 +19,9 @@ def badge_class(value):
         'INFO': 'info',
         'WARN': 'warning',
         'ERROR': 'danger',
+
+        'ONLINE': 'success',
+        'OFFLINE': 'danger',
+        'DEGRADED': 'warning',
     }
     return mapping.get(value, 'secondary')
