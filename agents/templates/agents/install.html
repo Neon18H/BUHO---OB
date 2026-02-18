@@ -2,6 +2,7 @@
 {% block content %}
 <h1 class="h4 mb-3">Instalar agente</h1>
 <div class="card p-3 mb-3">
+  {% if can_manage_tokens %}
   <form method="post" action="{% url 'agents:token_create' %}">{% csrf_token %}
     <div class="row g-2">
       <div class="col-md-3">{{ form.expiration }}</div>
@@ -10,6 +11,9 @@
       <div class="col-md-2 d-grid"><button class="btn btn-primary">Crear token</button></div>
     </div>
   </form>
+  {% else %}
+  <div class="alert alert-warning mb-0">Solo administradores pueden crear tokens.</div>
+  {% endif %}
 </div>
 {% if latest_token %}
 <div class="card p-3">
