@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Agent, AgentEnrollmentToken
+from .models import Agent, AgentDownload, AgentEnrollmentToken, AgentHeartbeat
 
 
 @admin.register(Agent)
@@ -12,6 +12,17 @@ class AgentAdmin(admin.ModelAdmin):
 
 @admin.register(AgentEnrollmentToken)
 class AgentEnrollmentTokenAdmin(admin.ModelAdmin):
-    list_display = ('masked_token', 'organization', 'expires_at', 'is_used', 'is_revoked', 'created_by', 'created_at')
-    list_filter = ('organization', 'is_used', 'is_revoked')
+    list_display = ('masked_token', 'organization', 'expires_at', 'is_used', 'is_revoked', 'allow_multi_use', 'created_by', 'created_at')
+    list_filter = ('organization', 'is_used', 'is_revoked', 'allow_multi_use')
     search_fields = ('token',)
+
+
+@admin.register(AgentHeartbeat)
+class AgentHeartbeatAdmin(admin.ModelAdmin):
+    list_display = ('agent', 'ts', 'status')
+    list_filter = ('status',)
+
+
+@admin.register(AgentDownload)
+class AgentDownloadAdmin(admin.ModelAdmin):
+    list_display = ('name', 'platform', 'version', 'created_at')

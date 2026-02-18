@@ -1,54 +1,57 @@
 {% extends 'ui/base.html' %}
-
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
-    <h1 class="h4 mb-0">Overview</h1>
-    <small class="text-body-secondary">Panel general de salud y actividad</small>
+    <h1 class="h3 mb-0">Overview</h1>
+    <small class="text-body-secondary">Enterprise observability dashboard (demo)</small>
   </div>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#widgetModal"><i class="bi bi-plus-circle"></i> Agregar widget</button>
 </div>
 
-<div class="row g-3 mb-3">
-  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Agents online' value=kpis.agents_online icon='bi-robot' %}</div>
-  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Active alerts' value=kpis.active_alerts icon='bi-bell-fill' %}</div>
-  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Errors (24h)' value=kpis.errors_24h icon='bi-exclamation-triangle' %}</div>
-  <div class="col-md-6 col-xl-3">{% include 'ui/components/kpi_card.html' with title='Monitored servers' value=kpis.monitored_servers icon='bi-hdd-stack' %}</div>
+<div class="row g-3 mb-4">
+  {% for kpi in kpi_cards %}
+  <div class="col-sm-6 col-xl-3">{% include 'ui/components/kpi_card.html' with icon=kpi.icon title=kpi.title value=kpi.value %}</div>
+  {% endfor %}
 </div>
 
 <div class="row g-3">
-  <div class="col-lg-8">
-    <div class="card h-100">
-      <div class="card-header"><strong>Health trend</strong></div>
-      <div class="card-body"><canvas id="trendChart" height="90"></canvas></div>
+  <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='CPU / RAM (15m)' chart_id='cpuRamChart' %}</div>
+  <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Network In / Out (15m)' chart_id='networkChart' %}</div>
+  <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Top 5 procesos por CPU' chart_id='processChart' %}</div>
+  <div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Logs por severidad' chart_id='severityChart' %}</div>
+</div>
+
+<div class="card mt-3 table-card">
+  <div class="card-header"><strong>Top endpoints con errores</strong></div>
+  <div class="table-responsive"><table class="table mb-0"><thead><tr><th>Endpoint</th><th>Errores/h</th><th>Lat p95</th></tr></thead><tbody>{% for row in top_endpoints %}<tr><td>{{ row.endpoint }}</td><td>{{ row.errors }}</td><td>{{ row.p95 }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+
+{% if widgets %}
+<div class="row g-3 mt-1">
+  {% for widget in widgets %}
+    <div class="col-lg-4"><div class="card p-3"><h6>{{ widget.title }}</h6><small class="text-body-secondary">Tipo: {{ widget.type }}</small><pre class="small mb-0">{{ widget.config_json }}</pre></div></div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="modal fade" id="widgetModal" tabindex="-1">
+  <div class="modal-dialog"><form method="post" action="{% url 'ui:widget_create' %}" class="modal-content">{% csrf_token %}
+    <div class="modal-header"><h5 class="modal-title">Agregar widget</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body vstack gap-2">
+      <input class="form-control" name="title" placeholder="Título del widget" required>
+      <select class="form-select" name="type"><option>KPI</option><option>Time-series</option><option>Bar</option><option>Pie</option><option>Table</option></select>
+      <textarea class="form-control" name="config_json" rows="4" placeholder='{"metric":"cpu"}'></textarea>
     </div>
-  </div>
-  <div class="col-lg-4">
-    <div class="card h-100">
-      <div class="card-header"><strong>Latest audit events</strong></div>
-      <ul class="list-group list-group-flush">
-      {% for event in events %}
-        <li class="list-group-item">
-          <div class="small text-body-secondary">{{ event.created_at|date:'Y-m-d H:i' }}</div>
-          <div>{{ event.action }} · {{ event.target_type }} {{ event.target_id|default:'' }}</div>
-        </li>
-      {% empty %}
-        <li class="list-group-item text-body-secondary">No hay eventos.</li>
-      {% endfor %}
-      </ul>
-    </div>
-  </div>
+    <div class="modal-footer"><button class="btn btn-primary">Guardar widget</button></div>
+  </form></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-new Chart(document.getElementById('trendChart'), {
-    type: 'line',
-    data: {
-      labels: {{ chart_labels|safe }},
-      datasets: [{label: 'Health score', data: {{ chart_values|safe }}, borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,.2)', fill: true, tension: 0.35}]
-    },
-    options: {plugins: {legend: {display: false}}}
-});
+new Chart(document.getElementById('cpuRamChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'CPU %',data:{{ cpu_values|safe }},borderColor:'#4f46e5',tension:.35},{label:'RAM %',data:{{ ram_values|safe }},borderColor:'#06b6d4',tension:.35}]}});
+new Chart(document.getElementById('networkChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'In MB/s',data:{{ net_in|safe }},borderColor:'#16a34a'},{label:'Out MB/s',data:{{ net_out|safe }},borderColor:'#f97316'}]}});
+new Chart(document.getElementById('processChart'), {type:'bar', data:{labels:{{ process_labels|safe }},datasets:[{label:'CPU %',data:{{ process_values|safe }},backgroundColor:'#8b5cf6'}]}});
+new Chart(document.getElementById('severityChart'), {type:'pie', data:{labels:['INFO','WARN','ERROR'],datasets:[{data:{{ severity_values|safe }},backgroundColor:['#0ea5e9','#f59e0b','#ef4444']}]}});
 </script>
 {% endblock %}

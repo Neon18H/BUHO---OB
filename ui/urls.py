@@ -12,6 +12,7 @@ from .views import (
     UserCreateView,
     UserDeactivateView,
     UserUpdateView,
+    WidgetCreateView,
 )
 
 app_name = 'ui'
@@ -23,6 +24,7 @@ urlpatterns = [
     path('apps/', AppsListView.as_view(), name='apps'),
     path('logs/', LogsExplorerView.as_view(), name='logs'),
     path('alerts/', AlertsView.as_view(), name='alerts'),
+    path('widgets/create/', WidgetCreateView.as_view(), name='widget_create'),
     path('settings/', SettingsDashboardView.as_view(), name='settings'),
     path('settings/users/create/', UserCreateView.as_view(), name='user_create'),
     path('settings/users/<int:user_id>/update/', UserUpdateView.as_view(), name='user_update'),

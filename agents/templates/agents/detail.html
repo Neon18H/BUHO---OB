@@ -1,20 +1,16 @@
 {% extends 'ui/base.html' %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 mb-0">{{ agent.name }}</h1>
-  <span class="badge text-bg-primary">{{ agent.get_status_display }}</span>
-</div>
+<h1 class="h3 mb-3">{{ agent.name }}</h1>
 <ul class="nav nav-tabs mb-3">
-  <li class="nav-item"><a class="nav-link active" href="#">Overview</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Metrics</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Processes</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Logs</a></li>
-  <li class="nav-item"><a class="nav-link" href="#">Alerts</a></li>
+  <li class="nav-item"><a class="nav-link active">Overview</a></li>
+  <li class="nav-item"><a class="nav-link">Heartbeat</a></li>
+  <li class="nav-item"><a class="nav-link">Config</a></li>
+  <li class="nav-item"><a class="nav-link">Metrics</a></li>
+  <li class="nav-item"><a class="nav-link">Logs</a></li>
+  <li class="nav-item"><a class="nav-link">Alerts</a></li>
 </ul>
 <div class="row g-3">
-  <div class="col-lg-4"><div class="card"><div class="card-body"><div class="small text-body-secondary">Hostname</div><strong>{{ agent.hostname }}</strong></div></div></div>
-  <div class="col-lg-4"><div class="card"><div class="card-body"><div class="small text-body-secondary">IP Address</div><strong>{{ agent.ip_address }}</strong></div></div></div>
-  <div class="col-lg-4"><div class="card"><div class="card-body"><div class="small text-body-secondary">Version</div><strong>{{ agent.version }}</strong></div></div></div>
+  <div class="col-lg-4"><div class="card p-3"><h6>Status</h6><p>{{ agent.get_status_display }}</p><h6>Last seen</h6><p>{{ agent.last_seen|date:'Y-m-d H:i:s' }}</p><h6>Version</h6><p>{{ agent.version }}</p></div></div>
+  <div class="col-lg-8"><div class="card p-3"><h6>Heartbeats recientes</h6><table class="table table-sm"><thead><tr><th>Timestamp</th><th>Status</th><th>Metadata</th></tr></thead><tbody>{% for hb in heartbeats %}<tr><td>{{ hb.ts|date:'Y-m-d H:i:s' }}</td><td>{{ hb.status }}</td><td><code>{{ hb.metadata_json }}</code></td></tr>{% empty %}<tr><td colspan="3">Sin heartbeats aún.</td></tr>{% endfor %}</tbody></table></div></div>
 </div>
-<div class="card mt-3"><div class="card-body text-body-secondary">Placeholders funcionales para métricas, procesos, logs y alertas por agente en próximas fases.</div></div>
 {% endblock %}
