@@ -1,4 +1,7 @@
+import py_compile
+import tempfile
 from datetime import timedelta
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -17,8 +20,18 @@ class AgentDownloadScriptTests(TestCase):
         script = build_agent_py()
 
         self.assertIn('system_drive = os.environ.get("SystemDrive", "C:")', script)
-        self.assertIn('disk_target = system_drive + "\\" if os.name == "nt" else "/"', script)
+        self.assertIn('def get_disk_target():', script)
+        self.assertIn('return os.path.join(system_drive, "\\\\")', script)
+        self.assertIn('disk_target = get_disk_target()', script)
         self.assertNotIn('disk_target = "C:\\" if os.name == "nt" else "/"', script)
+
+    def test_generated_agent_py_compiles(self):
+        script = build_agent_py()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_path = Path(tmpdir) / 'agent.py'
+            agent_path.write_text(script, encoding='utf-8')
+            py_compile.compile(str(agent_path), doraise=True)
 
     def test_windows_installer_fails_fast_before_scheduled_task(self):
         script = build_windows_installer('http://buho.example', 'tok123')
