@@ -2,8 +2,9 @@ from django.urls import path
 
 from .views import (
     AgentDetailView,
-    AgentDownloadLinuxPyView,
+    AgentDownloadAgentPyView,
     AgentDownloadLinuxView,
+    AgentDownloadRequirementsView,
     AgentDownloadWindowsView,
     AgentsInstallView,
     AgentsOverviewView,
@@ -21,7 +22,8 @@ urlpatterns = [
     path('tokens/create/', TokenCreateView.as_view(), name='token_create'),
     path('tokens/<int:token_id>/revoke/', TokenRevokeView.as_view(), name='token_revoke'),
     path('download/linux.sh', AgentDownloadLinuxView.as_view(), name='download_linux'),
-    path('download/linux.py', AgentDownloadLinuxPyView.as_view(), name='download_linux_py'),
+    path('download/agent.py', AgentDownloadAgentPyView.as_view(), name='download_agent_py'),
+    path('download/requirements.txt', AgentDownloadRequirementsView.as_view(), name='download_requirements'),
     path('download/windows.ps1', AgentDownloadWindowsView.as_view(), name='download_windows'),
     path('<int:agent_id>/', AgentDetailView.as_view(), name='detail'),
 ]

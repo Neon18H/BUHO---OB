@@ -7,7 +7,7 @@ Proyecto Django local (SQLite) con UI moderna tipo SaaS y módulo de **Agentes**
 - `buho/` configuración principal Django.
 - `ui/` vistas y templates del dashboard (Overview, Servers, Apps, Logs, Alerts, Settings).
 - `agents/` nuevo módulo para agentes y tokens de enrollment.
-- `accounts/` usuarios, organizaciones y comando `seed_demo`.
+- `accounts/` usuarios, organizaciones y registro inicial (`/register`).
 - `audit/` auditoría de acciones.
 - `static/css/buho.css` design system base y dark mode.
 
@@ -15,8 +15,10 @@ Proyecto Django local (SQLite) con UI moderna tipo SaaS y módulo de **Agentes**
 
 ```bash
 python manage.py migrate
-python manage.py seed_demo
 python manage.py runserver
+
+# Inicializa la primera organización en http://127.0.0.1:8000/register/
+# (Opcional desarrollo) python manage.py seed_users
 ```
 
 ### Credenciales demo

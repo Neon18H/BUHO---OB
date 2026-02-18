@@ -11,6 +11,7 @@ from .views import (
     SettingsDashboardView,
     UserCreateView,
     UserDeactivateView,
+    UserResetPasswordView,
     UserUpdateView,
     WidgetCreateView,
 )
@@ -26,8 +27,10 @@ urlpatterns = [
     path('alerts/', AlertsView.as_view(), name='alerts'),
     path('widgets/create/', WidgetCreateView.as_view(), name='widget_create'),
     path('settings/', SettingsDashboardView.as_view(), name='settings'),
+    path('settings/users/', SettingsDashboardView.as_view(), name='settings_users'),
     path('settings/users/create/', UserCreateView.as_view(), name='user_create'),
     path('settings/users/<int:user_id>/update/', UserUpdateView.as_view(), name='user_update'),
     path('settings/users/<int:user_id>/deactivate/', UserDeactivateView.as_view(), name='user_deactivate'),
+    path('settings/users/<int:user_id>/reset-password/', UserResetPasswordView.as_view(), name='user_reset_password'),
     path('settings/organizations/<int:org_id>/update/', OrganizationUpdateView.as_view(), name='organization_update'),
 ]

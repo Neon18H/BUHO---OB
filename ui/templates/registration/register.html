@@ -1,0 +1,51 @@
+{% load static %}
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Buho · Registro inicial</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="{% static 'css/buho-auth.css' %}" rel="stylesheet">
+</head>
+<body>
+<div class="auth-shell">
+  <div class="auth-brand">
+    <div class="glow"></div>
+    <div class="brand-content">
+      <h1>Inicializa Buho</h1>
+      <p>Crea tu organización y define el usuario propietario (SUPERADMIN).</p>
+      <ul>
+        <li>Tenant aislado por organización</li>
+        <li>Gestión de usuarios por roles</li>
+        <li>Instalación de agentes desde panel</li>
+      </ul>
+    </div>
+  </div>
+  <div class="auth-form-wrap">
+    <div class="card auth-card">
+      <div class="card-body p-4">
+        <h2 class="h4 mb-3">Registro inicial</h2>
+        <form method="post">
+          {% csrf_token %}
+          <label class="form-label">Organización</label>
+          <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-building"></i></span>{{ form.organization_name }}</div>
+          <label class="form-label">Usuario</label>
+          <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-person"></i></span>{{ form.username }}</div>
+          <label class="form-label">Correo</label>
+          <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-envelope"></i></span>{{ form.email }}</div>
+          <label class="form-label">Contraseña</label>
+          <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-lock"></i></span>{{ form.password1 }}</div>
+          <label class="form-label">Confirmar contraseña</label>
+          <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-shield-lock"></i></span>{{ form.password2 }}</div>
+          {% if form.errors %}<div class="alert alert-danger">{{ form.errors }}</div>{% endif %}
+          <button class="btn btn-primary w-100" type="submit">Crear organización y entrar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="{% static 'js/buho-theme.js' %}"></script>
+</body>
+</html>

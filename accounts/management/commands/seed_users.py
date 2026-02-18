@@ -4,12 +4,12 @@ from accounts.models import Organization, User
 
 
 class Command(BaseCommand):
-    help = 'Seed organizations/users for local login (no demo telemetry).'
+    help = 'Optional local seed: create a single organization with admin and basic users.'
 
     def handle(self, *args, **options):
         org, _ = Organization.objects.get_or_create(name='DemoOrg', defaults={'plan': Organization.Plan.PRO})
         users = [
-            ('superadmin', 'SUPERADMIN', None),
+            ('superadmin', 'SUPERADMIN', org),
             ('orgadmin', 'ORG_ADMIN', org),
             ('analyst', 'ANALYST', org),
             ('viewer', 'VIEWER', org),
@@ -22,7 +22,7 @@ class Command(BaseCommand):
                     'role': role,
                     'organization': organization,
                     'is_staff': role == 'SUPERADMIN',
-                    'is_superuser': role == 'SUPERADMIN',
+                    'is_superuser': False,
                 },
             )
             if created:

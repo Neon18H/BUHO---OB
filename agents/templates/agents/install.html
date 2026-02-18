@@ -12,21 +12,33 @@
     </div>
   </form>
   {% else %}
-  <div class="alert alert-warning mb-0">Solo administradores pueden crear tokens.</div>
+  <div class="alert alert-warning mb-0">Solo SUPERADMIN/ORG_ADMIN pueden crear tokens.</div>
   {% endif %}
 </div>
 {% if latest_token %}
 <div class="card p-3">
   <div class="mb-2"><strong>Buho Server URL:</strong> <code>{{ server_url }}</code></div>
   <div class="mb-2"><strong>Token:</strong> <code id="tokenText">{{ latest_token.token }}</code></div>
-  <label class="form-label">Instalación Linux (sudo)</label>
-  <pre id="cmdSudo">curl -fsSL {{ server_url }}/agents/download/linux.sh?token={{ latest_token.token }} | sudo bash</pre>
-  <button class="btn btn-outline-primary btn-sm mb-3" onclick="copyFrom('cmdSudo')">Copiar comando</button>
-  <label class="form-label">Instalación Linux (sin sudo)</label>
-  <pre id="cmdNoSudo">curl -fsSL {{ server_url }}/agents/download/linux.sh?token={{ latest_token.token }} | bash</pre>
-  <button class="btn btn-outline-primary btn-sm" onclick="copyFrom('cmdNoSudo')">Copiar comando</button>
-  <hr>
-  <a class="btn btn-outline-secondary btn-sm" href="{{ server_url }}/agents/download/windows.ps1?token={{ latest_token.token }}">Descargar windows.ps1</a>
+  <label class="form-label">Instalación Windows (recomendada)</label>
+  <pre id="cmdWin">iwr -useb {{ server_url }}/agents/download/windows.ps1?token={{ latest_token.token }} | iex</pre>
+  <button class="btn btn-outline-primary btn-sm mb-3" onclick="copyFrom('cmdWin')">Copiar comando</button>
+
+  <label class="form-label">Alternativa Windows (si iwr bloqueado)</label>
+  <pre id="cmdWinAlt">Invoke-WebRequest -Uri "{{ server_url }}/agents/download/windows.ps1?token={{ latest_token.token }}" -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1</pre>
+  <button class="btn btn-outline-primary btn-sm mb-3" onclick="copyFrom('cmdWinAlt')">Copiar comando</button>
+
+  <label class="form-label">Instalación Linux (usuario)</label>
+  <pre id="cmdLinux">curl -fsSL {{ server_url }}/agents/download/linux.sh?token={{ latest_token.token }} | bash</pre>
+  <button class="btn btn-outline-primary btn-sm mb-3" onclick="copyFrom('cmdLinux')">Copiar comando</button>
+
+  <div class="alert alert-info mb-0">
+    <strong>Troubleshooting:</strong>
+    <ul class="mb-0">
+      <li>PowerShell 5+ y Python 3 en PATH.</li>
+      <li>Ejecutar como administrador para tarea programada global.</li>
+      <li>Logs locales: <code>C:\ProgramData\BuhoAgent\buho-agent.log</code>.</li>
+    </ul>
+  </div>
 </div>
 {% else %}
 <div class="alert alert-info">Crea un token para empezar.</div>

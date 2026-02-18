@@ -1,4 +1,5 @@
 from textwrap import dedent
+from datetime import timedelta
 
 from django.contrib import messages
 from django.http import HttpResponse, HttpResponseBadRequest
@@ -6,7 +7,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views import View
 
-from accounts.models import Organization
 from audit.utils import create_audit_log
 from ui.permissions import RoleRequiredUIMixin
 
@@ -14,24 +14,268 @@ from .forms import TokenCreateForm
 from .models import Agent, AgentEnrollmentToken
 
 
+AGENT_REQUIREMENTS = "requests\npsutil\n"
+
+
+def build_agent_py():
+    return dedent(
+        """
+        import argparse
+        import json
+        import os
+        import platform
+        import socket
+        import time
+        from datetime import datetime, timezone
+        from pathlib import Path
+        from urllib.error import URLError
+        from urllib.request import Request, urlopen
+
+        try:
+            import psutil
+        except Exception:
+            psutil = None
+
+        try:
+            import requests
+        except Exception:
+            requests = None
+
+        VERSION = "0.2.0"
+
+        def utc_now():
+            return datetime.now(timezone.utc).isoformat()
+
+        def load_config(path):
+            p = Path(path)
+            if not p.exists():
+                return {}
+            return json.loads(p.read_text(encoding="utf-8"))
+
+        def save_config(path, cfg):
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+        def post_json(url, payload, headers=None, timeout=10):
+            headers = headers or {}
+            if requests:
+                r = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                return r.status_code, r.json() if r.content else {}
+            data = json.dumps(payload).encode("utf-8")
+            req = Request(url, data=data, headers={"Content-Type": "application/json", **headers}, method="POST")
+            try:
+                with urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read().decode("utf-8")
+                    return resp.status, json.loads(raw) if raw else {}
+            except URLError as exc:
+                raise RuntimeError(str(exc))
+
+        def get_ip_address():
+            try:
+                return socket.gethostbyname(socket.gethostname())
+            except Exception:
+                return "127.0.0.1"
+
+        def collect_metrics():
+            if not psutil:
+                return [{"name": "cpu.percent", "value": 0, "unit": "%"}]
+            disk_target = "C:\\" if os.name == "nt" else "/"
+            d = psutil.disk_usage(disk_target)
+            m = psutil.virtual_memory()
+            n = psutil.net_io_counters()
+            rows = [
+                {"name": "cpu.percent", "value": psutil.cpu_percent(interval=0.1), "unit": "%"},
+                {"name": "mem.percent", "value": m.percent, "unit": "%"},
+                {"name": "disk.root.used_percent", "value": d.percent, "unit": "%"},
+                {"name": "net.bytes_sent", "value": n.bytes_sent, "unit": "bytes"},
+                {"name": "net.bytes_recv", "value": n.bytes_recv, "unit": "bytes"},
+                {"name": "uptime.seconds", "value": time.time() - psutil.boot_time(), "unit": "seconds"},
+            ]
+            if hasattr(os, "getloadavg"):
+                rows.append({"name": "load.1m", "value": os.getloadavg()[0], "unit": "load"})
+            return rows
+
+        def collect_processes(limit=25):
+            if not psutil:
+                return []
+            rows = []
+            for proc in psutil.process_iter(["pid", "name", "username", "cmdline", "cpu_percent", "memory_percent"]):
+                try:
+                    rows.append(
+                        {
+                            "pid": proc.info.get("pid", 0),
+                            "name": (proc.info.get("name") or "unknown")[:255],
+                            "cpu": float(proc.info.get("cpu_percent") or 0),
+                            "mem": float(proc.info.get("memory_percent") or 0),
+                            "user": (proc.info.get("username") or "")[:255],
+                            "cmdline": " ".join(proc.info.get("cmdline") or [])[:500],
+                        }
+                    )
+                except Exception:
+                    continue
+            rows.sort(key=lambda item: (item["cpu"], item["mem"]), reverse=True)
+            return rows[:limit]
+
+        def collect_logs(log_file):
+            p = Path(log_file)
+            if not p.exists():
+                return []
+            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()[-10:]
+            return [{"ts": utc_now(), "level": "INFO", "source": "agent", "message": line, "fields": {}} for line in lines]
+
+        def enroll(config_path):
+            cfg = load_config(config_path)
+            if cfg.get("agent_id") and cfg.get("agent_key"):
+                return cfg
+            payload = {
+                "token": cfg["token"],
+                "hostname": socket.gethostname(),
+                "ip_address": get_ip_address(),
+                "os": platform.platform(),
+                "arch": platform.machine(),
+                "version": VERSION,
+                "name": socket.gethostname(),
+            }
+            status_code, data = post_json(f"{cfg['server_url']}/api/agents/enroll", payload)
+            if status_code != 200:
+                raise RuntimeError(f"enroll failed: {status_code}")
+            cfg["agent_id"] = data["agent_id"]
+            cfg["agent_key"] = data["agent_key"]
+            save_config(config_path, cfg)
+            return cfg
+
+        def run_loop(config_path, once=False):
+            cfg = load_config(config_path)
+            cfg = enroll(config_path)
+            headers = {"X-Buho-Agent-Id": str(cfg["agent_id"]), "X-Buho-Agent-Key": cfg["agent_key"]}
+            heartbeat_interval = int(cfg.get("heartbeat_interval", 15))
+            metrics_interval = int(cfg.get("metrics_interval", 10))
+            processes_interval = int(cfg.get("processes_interval", 15))
+            last_heartbeat = 0
+            last_metrics = 0
+            last_processes = 0
+            backoff = 2
+
+            while True:
+                now = time.time()
+                try:
+                    if now - last_heartbeat >= heartbeat_interval:
+                        post_json(f"{cfg['server_url']}/api/agents/heartbeat", {"status": "ONLINE", "metadata": {"agent_version": VERSION}}, headers)
+                        last_heartbeat = now
+                    if now - last_metrics >= metrics_interval:
+                        post_json(f"{cfg['server_url']}/api/ingest/metrics", {"ts": utc_now(), "metrics": collect_metrics()}, headers)
+                        post_json(f"{cfg['server_url']}/api/ingest/logs", {"logs": collect_logs(cfg.get("log_file", "buho-agent.log"))}, headers)
+                        last_metrics = now
+                    if now - last_processes >= processes_interval:
+                        post_json(f"{cfg['server_url']}/api/ingest/processes", {"ts": utc_now(), "processes": collect_processes()}, headers)
+                        last_processes = now
+                    backoff = 2
+                    if once:
+                        return
+                    time.sleep(1)
+                except Exception as exc:
+                    Path(cfg.get("log_file", "buho-agent.log")).parent.mkdir(parents=True, exist_ok=True)
+                    with open(cfg.get("log_file", "buho-agent.log"), "a", encoding="utf-8") as handle:
+                        handle.write(f"{utc_now()} loop-error {exc}\\n")
+                    if once:
+                        raise
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 60)
+
+        def main():
+            parser = argparse.ArgumentParser(description="Buho Agent")
+            parser.add_argument("--config", required=True)
+            parser.add_argument("--enroll", action="store_true")
+            parser.add_argument("--run", action="store_true")
+            parser.add_argument("--once", action="store_true")
+            args = parser.parse_args()
+            if args.enroll:
+                enroll(args.config)
+                return
+            if args.run or args.once:
+                run_loop(args.config, once=args.once)
+                return
+            parser.error("Use --enroll, --run or --once")
+
+        if __name__ == "__main__":
+            main()
+        """
+    ).strip() + "\n"
+
+
+def build_windows_installer(server_url: str, token: str):
+    return dedent(
+        f"""
+        $ErrorActionPreference = "Stop"
+        $BuhoUrl = "{server_url}"
+        $Token = "{token}"
+        $InstallRoot = "C:\\ProgramData\\BuhoAgent"
+        $ConfigPath = Join-Path $InstallRoot "config.json"
+        $LogPath = Join-Path $InstallRoot "buho-agent.log"
+
+        function Write-Step($message) {{ Write-Host "[BuhoAgent] $message" -ForegroundColor Cyan }}
+
+        if ($PSVersionTable.PSVersion.Major -lt 5) {{ Write-Host "PowerShell 5+ requerido." -ForegroundColor Red; exit 1 }}
+        if (-not (Get-Command python -ErrorAction SilentlyContinue)) {{
+            Write-Host "Python 3 no encontrado en PATH. Instálalo desde https://www.python.org/downloads/windows/." -ForegroundColor Yellow
+            exit 1
+        }}
+
+        New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+        Write-Step "Descargando agent.py y requirements.txt"
+        Invoke-WebRequest -Uri "$BuhoUrl/agents/download/agent.py" -OutFile (Join-Path $InstallRoot "agent.py")
+        Invoke-WebRequest -Uri "$BuhoUrl/agents/download/requirements.txt" -OutFile (Join-Path $InstallRoot "requirements.txt")
+
+        $config = @{{
+            server_url = $BuhoUrl
+            token = $Token
+            heartbeat_interval = 15
+            metrics_interval = 10
+            processes_interval = 15
+            log_file = $LogPath
+        }}
+        $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
+
+        Write-Step "Creando entorno virtual"
+        python -m venv (Join-Path $InstallRoot "venv")
+        $PyExe = Join-Path $InstallRoot "venv\\Scripts\\python.exe"
+        & $PyExe -m pip install --disable-pip-version-check -r (Join-Path $InstallRoot "requirements.txt")
+
+        Write-Step "Ejecutando enroll"
+        & $PyExe (Join-Path $InstallRoot "agent.py") --enroll --config $ConfigPath
+
+        $taskAction = New-ScheduledTaskAction -Execute $PyExe -Argument "`"$InstallRoot\\agent.py`" --run --config `"$ConfigPath`""
+        $triggerStartup = New-ScheduledTaskTrigger -AtStartup
+        $triggerLogin = New-ScheduledTaskTrigger -AtLogOn
+
+        try {{
+            Write-Step "Creando tarea programada global BuhoAgent"
+            Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerStartup, $triggerLogin) -RunLevel Highest -Force | Out-Null
+        }} catch {{
+            Write-Host "No se pudo crear tarea global (sin admin). Intentando tarea en contexto de usuario..." -ForegroundColor Yellow
+            Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerLogin) -Force | Out-Null
+        }}
+
+        Start-ScheduledTask -TaskName "BuhoAgent" | Out-Null
+        Write-Host "Instalación completa. Revisa /agents/overview en Buho para validar estado ONLINE." -ForegroundColor Green
+        """
+    ).strip() + "\n"
+
+
 class AgentOrganizationMixin:
     def scoped_organization(self, request):
-        if request.user.role == 'SUPERADMIN':
-            org_id = request.session.get('active_org_id')
-            if org_id:
-                return Organization.objects.filter(id=org_id).first()
-            return None
         return request.user.organization
 
     def scoped_agents(self, request):
         org = self.scoped_organization(request)
         qs = Agent.objects.select_related('organization')
-        return qs.filter(organization=org) if org else qs
+        return qs.filter(organization=org) if org else qs.none()
 
     def scoped_tokens(self, request):
         org = self.scoped_organization(request)
         qs = AgentEnrollmentToken.objects.select_related('organization', 'created_by')
-        return qs.filter(organization=org) if org else qs
+        return qs.filter(organization=org) if org else qs.none()
 
 
 class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
@@ -40,13 +284,16 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
     def get(self, request):
         agents = self.scoped_agents(request)
+        cutoff = timezone.now() - timedelta(seconds=90)
+        agents.filter(last_seen__lt=cutoff).exclude(status=Agent.Status.OFFLINE).update(status=Agent.Status.OFFLINE)
+        agents.filter(last_seen__gte=cutoff).exclude(status=Agent.Status.ONLINE).update(status=Agent.Status.ONLINE)
         create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='AgentList', metadata={'count': agents.count()})
         return render(
             request,
             'agents/overview.html',
             {
                 'agents': agents,
-                'can_manage_tokens': request.user.is_superuser or request.user.role in {'SUPERADMIN', 'ORG_ADMIN'},
+                'can_manage_tokens': request.user.role in {'SUPERADMIN', 'ORG_ADMIN'},
                 'online_count': agents.filter(status=Agent.Status.ONLINE).count(),
                 'offline_count': agents.filter(status=Agent.Status.OFFLINE).count(),
                 'degraded_count': agents.filter(status=Agent.Status.DEGRADED).count(),
@@ -71,7 +318,6 @@ class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     def get(self, request):
         latest_token = self.scoped_tokens(request).first()
         server_url = request.build_absolute_uri('/').rstrip('/')
-        can_manage_tokens = request.user.is_superuser or request.user.role in {'SUPERADMIN', 'ORG_ADMIN'}
         return render(
             request,
             'agents/install.html',
@@ -79,7 +325,7 @@ class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
                 'form': TokenCreateForm(),
                 'latest_token': latest_token,
                 'server_url': server_url,
-                'can_manage_tokens': can_manage_tokens,
+                'can_manage_tokens': request.user.role in {'SUPERADMIN', 'ORG_ADMIN'},
             },
         )
 
@@ -108,7 +354,7 @@ class TokenCreateView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
         org = self.scoped_organization(request)
         if org is None:
-            messages.error(request, 'Select an organization scope first.')
+            messages.error(request, 'No tienes organización asignada.')
             return redirect('agents:tokens')
 
         token = AgentEnrollmentToken.objects.create(
@@ -120,7 +366,6 @@ class TokenCreateView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             tags_json=form.get_tags(),
             allow_multi_use=form.cleaned_data['allow_multi_use'],
         )
-        request.session['latest_token_plain'] = token.token
         create_audit_log(
             request=request,
             actor=request.user,
@@ -162,95 +407,20 @@ class AgentDownloadLinuxView(View):
         if not token:
             return HttpResponseBadRequest('token required')
         server_url = request.build_absolute_uri('/').rstrip('/')
-        script = dedent("""#!/usr/bin/env bash
+        script = dedent(
+            f"""#!/usr/bin/env bash
 set -euo pipefail
-BUHO_URL="__SERVER_URL__"
-TOKEN="__TOKEN__"
-HAS_SUDO=0; if command -v sudo >/dev/null 2>&1; then HAS_SUDO=1; fi
-for bin in bash curl python3; do command -v "$bin" >/dev/null 2>&1 || { echo "missing $bin"; exit 1; }; done
-if [[ "$HAS_SUDO" == "1" && $(id -u) -ne 0 ]]; then PREFIX="sudo"; else PREFIX=""; fi
-if [[ -n "$PREFIX" || $(id -u) -eq 0 ]]; then INSTALL_DIR=/opt/buho-agent; CONF_DIR=/etc/buho-agent; LOG_FILE=/var/log/buho-agent.log; else INSTALL_DIR="$HOME/.buho-agent"; CONF_DIR="$HOME/.config/buho-agent"; LOG_FILE="$HOME/.buho-agent/buho-agent.log"; fi
-$PREFIX mkdir -p "$INSTALL_DIR" "$CONF_DIR"
-if python3 -m venv --help >/dev/null 2>&1; then python3 -m venv "$INSTALL_DIR/.venv" && PY="$INSTALL_DIR/.venv/bin/python"; else PY=python3; fi
-$PY -m pip install --quiet --disable-pip-version-check requests psutil || true
-cat > "$INSTALL_DIR/agent.py" <<'PYEOF'
-import json, os, time, socket, platform, pathlib, re
-from datetime import datetime, timezone
-import requests, psutil
-SERVER=os.environ.get('BUHO_URL'); TOKEN=os.environ.get('BUHO_TOKEN'); CONF=os.environ.get('BUHO_CONF'); LOG_FILE=os.environ.get('BUHO_LOG')
-S=re.compile(r'(?i)(authorization:|bearer\s+[A-Za-z0-9\-_\.]+|api[_-]?key\s*=\s*\S+|password\s*=\s*\S+|token\s*=\s*\S+)')
-def r(v): return S.sub('[REDACTED]', v or '')
-def log(m): pathlib.Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True); open(LOG_FILE,'a').write(f"{datetime.utcnow().isoformat()} {m}\n")
-def req(path,payload,h):
-    try: return requests.post(SERVER+path,json=payload,headers=h,timeout=8)
-    except Exception as e: log(f"request-error {e}"); return None
-def enroll():
-    if os.path.exists(CONF): return json.load(open(CONF))
-    payload={'token':TOKEN,'hostname':socket.gethostname(),'ip_address':'127.0.0.1','os':platform.platform(),'arch':platform.machine(),'version':'0.1.0','name':socket.gethostname()}
-    res=req('/api/agents/enroll',payload,{'Content-Type':'application/json'})
-    if not res or res.status_code != 200: raise SystemExit('enroll failed')
-    data=res.json(); pathlib.Path(CONF).parent.mkdir(parents=True, exist_ok=True); open(CONF,'w').write(json.dumps(data)); os.chmod(CONF,0o600); return data
-def metrics():
-    d=psutil.disk_usage('/'); n=psutil.net_io_counters(); m=psutil.virtual_memory()
-    return [{'name':'cpu.percent','value':psutil.cpu_percent(),'unit':'%'},{'name':'mem.percent','value':m.percent,'unit':'%'},{'name':'disk.root.used_percent','value':d.percent,'unit':'%'},{'name':'net.bytes_sent','value':n.bytes_sent,'unit':'bytes'},{'name':'net.bytes_recv','value':n.bytes_recv,'unit':'bytes'},{'name':'load.1m','value':os.getloadavg()[0] if hasattr(os,'getloadavg') else 0,'unit':'load'}]
-def procs():
-    rows=[]
-    for p in psutil.process_iter(['pid','name','username','cmdline','cpu_percent','memory_percent']):
-        try: rows.append({'pid':p.info['pid'],'name':p.info.get('name') or 'n/a','cpu':p.info.get('cpu_percent') or 0,'mem':p.info.get('memory_percent') or 0,'user':p.info.get('username') or '', 'cmdline':r(' '.join(p.info.get('cmdline') or []))})
-        except Exception: pass
-    rows=sorted(rows,key=lambda x:(x['cpu'],x['mem']),reverse=True)[:25]
-    return rows
-def logs_tail():
-    for p in ['/var/log/syslog','/var/log/messages']:
-        if os.path.exists(p):
-            try:
-                tail_lines = open(p,'r',errors='ignore').read().splitlines()[-5:]
-                return [{'ts':datetime.now(timezone.utc).isoformat(),'level':'INFO','source':'syslog','message':r(line.strip()),'fields':{}} for line in tail_lines if line.strip()]
-            except Exception:
-                return []
-    return []
-def loop():
-    conf=enroll(); h={'X-Buho-Agent-Id':str(conf['agent_id']),'X-Buho-Agent-Key':conf['agent_key']}; i=0
-    while True:
-        i+=1
-        req('/api/agents/heartbeat',{'status':'ONLINE','metadata':{'uptime':time.time(),'agent_version':'0.1.0'}},h)
-        req('/api/ingest/metrics',{'ts':datetime.now(timezone.utc).isoformat(),'metrics':metrics()},h)
-        if i % 2 == 0: req('/api/ingest/processes',{'ts':datetime.now(timezone.utc).isoformat(),'processes':procs()},h)
-        req('/api/ingest/logs',{'logs':logs_tail()},h)
-        time.sleep(10)
-if __name__=='__main__':
-    backoff=2
-    while True:
-        try: loop()
-        except Exception as e: log(f'loop-error {e}'); time.sleep(backoff); backoff=min(backoff*2,60)
-PYEOF
-cat > "$INSTALL_DIR/buho-agent.env" <<EOF
-BUHO_URL=$BUHO_URL
-BUHO_TOKEN=$TOKEN
-BUHO_CONF=$CONF_DIR/config.json
-BUHO_LOG=$LOG_FILE
+INSTALL_DIR="$HOME/.buho-agent"
+mkdir -p "$INSTALL_DIR"
+curl -fsSL {server_url}/agents/download/agent.py -o "$INSTALL_DIR/agent.py"
+cat > "$INSTALL_DIR/config.json" <<EOF
+{{"server_url":"{server_url}","token":"{token}","heartbeat_interval":15,"metrics_interval":10,"processes_interval":15,"log_file":"$INSTALL_DIR/buho-agent.log"}}
 EOF
-if command -v systemctl >/dev/null 2>&1 && [[ -n "$PREFIX" || $(id -u) -eq 0 ]]; then
-$PREFIX tee /etc/systemd/system/buho-agent.service >/dev/null <<EOF
-[Unit]
-Description=Buho Agent
-After=network.target
-[Service]
-Type=simple
-EnvironmentFile=$INSTALL_DIR/buho-agent.env
-ExecStart=$PY $INSTALL_DIR/agent.py
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
-$PREFIX systemctl daemon-reload
-$PREFIX systemctl enable --now buho-agent
-echo "Buho agent activo con systemd"
-else
-nohup $PY "$INSTALL_DIR/agent.py" > "$INSTALL_DIR/agent.out" 2>&1 &
-echo "No systemd/root. Running in user mode (nohup)."
-fi
-""").replace('__SERVER_URL__', server_url).replace('__TOKEN__', token)
+python3 -m venv "$INSTALL_DIR/venv"
+"$INSTALL_DIR/venv/bin/pip" install -r <(curl -fsSL {server_url}/agents/download/requirements.txt) || true
+nohup "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/agent.py" --run --config "$INSTALL_DIR/config.json" >/dev/null 2>&1 &
+"""
+        )
         response = HttpResponse(script, content_type='text/x-shellscript')
         response['Content-Disposition'] = 'attachment; filename="buho-agent-linux.sh"'
         return response
@@ -262,41 +432,20 @@ class AgentDownloadWindowsView(View):
         if not token:
             return HttpResponseBadRequest('token required')
         server_url = request.build_absolute_uri('/').rstrip('/')
-        script = dedent("""$BuhoUrl = "__SERVER_URL__"
-$Token = "__TOKEN__"
-$Root = Join-Path $env:USERPROFILE ".buho-agent"
-New-Item -ItemType Directory -Force -Path $Root | Out-Null
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Host "Python3 is required"; exit 1 }
-$agent = @"
-import os,time,socket,platform,requests,json
-url=os.environ.get('BUHO_URL'); token=os.environ.get('BUHO_TOKEN'); conf=os.path.join(os.environ.get('BUHO_ROOT'),'config.json')
-def post(p,d,h=None): return requests.post(url+p,json=d,headers=h or {},timeout=8)
-if os.path.exists(conf): c=json.load(open(conf))
-else:
- r=post('/api/agents/enroll',{'token':token,'hostname':socket.gethostname(),'ip_address':'127.0.0.1','os':platform.platform(),'arch':platform.machine(),'version':'0.1.0'})
- c=r.json(); open(conf,'w').write(json.dumps(c))
-h={'X-Buho-Agent-Id':str(c['agent_id']),'X-Buho-Agent-Key':c['agent_key']}
-while True:
- post('/api/agents/heartbeat',{'status':'ONLINE','metadata':{'agent_version':'0.1.0'}},h)
- post('/api/ingest/metrics',{'metrics':[{'name':'cpu.percent','value':0,'unit':'%'}]},h)
- time.sleep(10)
-"@
-Set-Content -Path (Join-Path $Root "agent.py") -Value $agent
-$env:BUHO_URL=$BuhoUrl; $env:BUHO_TOKEN=$Token; $env:BUHO_ROOT=$Root
-python (Join-Path $Root "agent.py")
-""").replace('__SERVER_URL__', server_url).replace('__TOKEN__', token)
-        response = HttpResponse(script, content_type='text/plain')
+        response = HttpResponse(build_windows_installer(server_url, token), content_type='text/plain')
         response['Content-Disposition'] = 'attachment; filename="buho-agent-windows.ps1"'
         return response
 
 
-class AgentDownloadLinuxPyView(View):
+class AgentDownloadAgentPyView(View):
     def get(self, request):
-        token = request.GET.get('token', '')
-        if not token:
-            return HttpResponseBadRequest('token required')
-        server_url = request.build_absolute_uri('/').rstrip('/')
-        py = f"import os; print('Use linux.sh installer for full setup. URL={server_url}, token={token}')\n"
-        response = HttpResponse(py, content_type='text/x-python')
-        response['Content-Disposition'] = 'attachment; filename="buho-agent-linux.py"'
+        response = HttpResponse(build_agent_py(), content_type='text/x-python')
+        response['Content-Disposition'] = 'attachment; filename="agent.py"'
+        return response
+
+
+class AgentDownloadRequirementsView(View):
+    def get(self, request):
+        response = HttpResponse(AGENT_REQUIREMENTS, content_type='text/plain')
+        response['Content-Disposition'] = 'attachment; filename="requirements.txt"'
         return response
