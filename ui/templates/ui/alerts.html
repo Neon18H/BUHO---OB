@@ -1,0 +1,8 @@
+{% extends 'ui/base.html' %}
+{% load ui_tags %}
+{% block content %}
+<h1 class="h4 mb-3">Alerts</h1>
+<div class="card"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>Title</th><th>Severity</th><th>Status</th></tr></thead><tbody>
+{% for alert in alerts %}<tr><td>{{ alert.title }}</td><td><span class="badge text-bg-{{ alert.severity|badge_class }}">{{ alert.severity }}</span></td><td><span class="badge text-bg-{{ alert.status|badge_class }}">{{ alert.status }}</span></td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}

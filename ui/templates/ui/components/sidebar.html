@@ -1,0 +1,16 @@
+<div class="bg-dark text-white p-3" style="min-height:100vh; width:250px;">
+    <h2 class="h5">🦉 Buho</h2>
+    <div class="small text-secondary mb-3">Observability MVP</div>
+    <div class="nav flex-column nav-pills gap-1">
+        <a class="nav-link text-white" href="{% url 'ui:overview' %}">Overview</a>
+        <a class="nav-link text-white" href="{% url 'ui:servers' %}">Servers</a>
+        <a class="nav-link text-white" href="{% url 'ui:apps' %}">Apps</a>
+        {% if request.user.role != 'VIEWER' %}
+        <a class="nav-link text-white" href="{% url 'ui:logs' %}">Logs</a>
+        <a class="nav-link text-white" href="{% url 'ui:alerts' %}">Alerts</a>
+        {% endif %}
+        {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}
+        <a class="nav-link text-white" href="{% url 'ui:settings' %}">Settings</a>
+        {% endif %}
+    </div>
+</div>

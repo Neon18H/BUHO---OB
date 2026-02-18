@@ -1,0 +1,38 @@
+{% extends 'ui/base.html' %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item active">Overview</li>
+  </ol>
+</nav>
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Agentes online</h6><h3>{{ kpis.agents_online }}</h3></div></div></div>
+  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Alertas activas</h6><h3>{{ kpis.active_alerts }}</h3></div></div></div>
+  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Errores últimas 24h</h6><h3>{{ kpis.errors_24h }}</h3></div></div></div>
+  <div class="col-md-3"><div class="card"><div class="card-body"><h6>Servidores monitoreados</h6><h3>{{ kpis.monitored_servers }}</h3></div></div></div>
+</div>
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card"><div class="card-body"><h5>Tendencia demo</h5><canvas id="trendChart" height="100"></canvas></div></div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card"><div class="card-body"><h5>Últimos eventos (AuditLog)</h5>
+            <ul class="list-group list-group-flush">
+            {% for event in events %}
+                <li class="list-group-item px-0"><small class="text-muted">{{ event.created_at }}</small><br>{{ event.action }} - {{ event.target_type }} {{ event.target_id|default:'' }}</li>
+            {% empty %}<li class="list-group-item px-0">No events yet.</li>{% endfor %}
+            </ul>
+        </div></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {labels: {{ chart_labels|safe }}, datasets: [{label: 'Eventos', data: {{ chart_values|safe }}, borderColor: '#0d6efd'}]},
+});
+</script>
+{% endblock %}

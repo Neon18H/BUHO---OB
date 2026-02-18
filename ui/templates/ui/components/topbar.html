@@ -1,0 +1,21 @@
+<nav class="navbar navbar-expand-lg bg-white border-bottom px-4">
+    <div class="container-fluid p-0">
+        <span class="navbar-brand mb-0 h1">Dashboard</span>
+        <div class="d-flex align-items-center gap-3">
+            {% if request.user.role == 'SUPERADMIN' %}
+            <form method="post" action="{% url 'accounts:switch_organization' %}">
+                {% csrf_token %}
+                <select class="form-select form-select-sm" name="organization_id" onchange="this.form.submit()">
+                    <option value="">All organizations</option>
+                    {% for org in all_orgs %}
+                    <option value="{{ org.id }}" {% if active_org and active_org.id == org.id %}selected{% endif %}>{{ org.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% endif %}
+            <span class="badge text-bg-secondary">{{ request.user.get_role_display }}</span>
+            <span>{{ request.user.username }}</span>
+            <a class="btn btn-outline-danger btn-sm" href="{% url 'accounts:logout' %}">Logout</a>
+        </div>
+    </div>
+</nav>
