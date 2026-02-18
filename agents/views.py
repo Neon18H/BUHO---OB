@@ -77,11 +77,16 @@ def build_agent_py():
             except Exception:
                 return "127.0.0.1"
 
+        def get_disk_target():
+            if os.name == "nt":
+                system_drive = os.environ.get("SystemDrive", "C:")
+                return os.path.join(system_drive, "\\\\")
+            return "/"
+
         def collect_metrics():
             if not psutil:
                 return [{"name": "cpu.percent", "value": 0, "unit": "%"}]
-            system_drive = os.environ.get("SystemDrive", "C:")
-            disk_target = system_drive + "\\" if os.name == "nt" else "/"
+            disk_target = get_disk_target()
             d = psutil.disk_usage(disk_target)
             m = psutil.virtual_memory()
             n = psutil.net_io_counters()
