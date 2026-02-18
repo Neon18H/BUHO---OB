@@ -8,7 +8,7 @@ from django.views import View
 
 from accounts.models import Organization
 from audit.utils import create_audit_log
-from ui.permissions import RoleRequiredMixin
+from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
 from .models import Agent, AgentEnrollmentToken
@@ -34,8 +34,9 @@ class AgentOrganizationMixin:
         return qs.filter(organization=org) if org else qs
 
 
-class AgentsOverviewView(RoleRequiredMixin, AgentOrganizationMixin, View):
+class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+    require_organization = True
 
     def get(self, request):
         agents = self.scoped_agents(request)
@@ -45,7 +46,7 @@ class AgentsOverviewView(RoleRequiredMixin, AgentOrganizationMixin, View):
             'agents/overview.html',
             {
                 'agents': agents,
-                'can_manage_tokens': request.user.role in {'SUPERADMIN', 'ORG_ADMIN'},
+                'can_manage_tokens': request.user.is_superuser or request.user.role in {'SUPERADMIN', 'ORG_ADMIN'},
                 'online_count': agents.filter(status=Agent.Status.ONLINE).count(),
                 'offline_count': agents.filter(status=Agent.Status.OFFLINE).count(),
                 'degraded_count': agents.filter(status=Agent.Status.DEGRADED).count(),
@@ -53,8 +54,9 @@ class AgentsOverviewView(RoleRequiredMixin, AgentOrganizationMixin, View):
         )
 
 
-class AgentDetailView(RoleRequiredMixin, AgentOrganizationMixin, View):
+class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+    require_organization = True
 
     def get(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
@@ -62,17 +64,30 @@ class AgentDetailView(RoleRequiredMixin, AgentOrganizationMixin, View):
         return render(request, 'agents/detail.html', {'agent': agent, 'heartbeats': agent.heartbeats.all()[:20]})
 
 
-class AgentsInstallView(RoleRequiredMixin, AgentOrganizationMixin, View):
+class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+    require_organization = True
 
     def get(self, request):
         latest_token = self.scoped_tokens(request).first()
         server_url = request.build_absolute_uri('/').rstrip('/')
-        return render(request, 'agents/install.html', {'form': TokenCreateForm(), 'latest_token': latest_token, 'server_url': server_url})
+        can_manage_tokens = request.user.is_superuser or request.user.role in {'SUPERADMIN', 'ORG_ADMIN'}
+        return render(
+            request,
+            'agents/install.html',
+            {
+                'form': TokenCreateForm(),
+                'latest_token': latest_token,
+                'server_url': server_url,
+                'can_manage_tokens': can_manage_tokens,
+            },
+        )
 
 
-class TokensView(RoleRequiredMixin, AgentOrganizationMixin, View):
+class TokensView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN'}
+    permission_redirect_url = 'agents:install'
+    require_organization = True
 
     def get(self, request):
         tokens = self.scoped_tokens(request)
@@ -80,8 +95,10 @@ class TokensView(RoleRequiredMixin, AgentOrganizationMixin, View):
         return render(request, 'agents/tokens.html', {'tokens': tokens, 'form': TokenCreateForm()})
 
 
-class TokenCreateView(RoleRequiredMixin, AgentOrganizationMixin, View):
+class TokenCreateView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN'}
+    permission_redirect_url = 'agents:install'
+    require_organization = True
 
     def post(self, request):
         form = TokenCreateForm(request.POST)
@@ -117,8 +134,10 @@ class TokenCreateView(RoleRequiredMixin, AgentOrganizationMixin, View):
         return redirect(request.META.get('HTTP_REFERER', 'agents:tokens'))
 
 
-class TokenRevokeView(RoleRequiredMixin, AgentOrganizationMixin, View):
+class TokenRevokeView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN'}
+    permission_redirect_url = 'agents:install'
+    require_organization = True
 
     def post(self, request, token_id):
         token = get_object_or_404(self.scoped_tokens(request), id=token_id)
