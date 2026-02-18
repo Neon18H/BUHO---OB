@@ -80,7 +80,8 @@ def build_agent_py():
         def collect_metrics():
             if not psutil:
                 return [{"name": "cpu.percent", "value": 0, "unit": "%"}]
-            disk_target = "C:\\" if os.name == "nt" else "/"
+            system_drive = os.environ.get("SystemDrive", "C:")
+            disk_target = system_drive + "\\" if os.name == "nt" else "/"
             d = psutil.disk_usage(disk_target)
             m = psutil.virtual_memory()
             n = psutil.net_io_counters()
@@ -213,8 +214,11 @@ def build_windows_installer(server_url: str, token: str):
         $InstallRoot = "C:\\ProgramData\\BuhoAgent"
         $ConfigPath = Join-Path $InstallRoot "config.json"
         $LogPath = Join-Path $InstallRoot "buho-agent.log"
+        $AgentPyPath = Join-Path $InstallRoot "agent.py"
+        $ReqPath = Join-Path $InstallRoot "requirements.txt"
 
         function Write-Step($message) {{ Write-Host "[BuhoAgent] $message" -ForegroundColor Cyan }}
+        function Write-ErrorStep($message) {{ Write-Host "[BuhoAgent] ERROR: $message" -ForegroundColor Red }}
 
         if ($PSVersionTable.PSVersion.Major -lt 5) {{ Write-Host "PowerShell 5+ requerido." -ForegroundColor Red; exit 1 }}
         if (-not (Get-Command python -ErrorAction SilentlyContinue)) {{
@@ -224,8 +228,8 @@ def build_windows_installer(server_url: str, token: str):
 
         New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
         Write-Step "Descargando agent.py y requirements.txt"
-        Invoke-WebRequest -Uri "$BuhoUrl/agents/download/agent.py" -OutFile (Join-Path $InstallRoot "agent.py")
-        Invoke-WebRequest -Uri "$BuhoUrl/agents/download/requirements.txt" -OutFile (Join-Path $InstallRoot "requirements.txt")
+        Invoke-WebRequest -Uri "$BuhoUrl/agents/download/agent.py" -OutFile $AgentPyPath
+        Invoke-WebRequest -Uri "$BuhoUrl/agents/download/requirements.txt" -OutFile $ReqPath
 
         $config = @{{
             server_url = $BuhoUrl
@@ -240,10 +244,22 @@ def build_windows_installer(server_url: str, token: str):
         Write-Step "Creando entorno virtual"
         python -m venv (Join-Path $InstallRoot "venv")
         $PyExe = Join-Path $InstallRoot "venv\\Scripts\\python.exe"
-        & $PyExe -m pip install --disable-pip-version-check -r (Join-Path $InstallRoot "requirements.txt")
+        & $PyExe -m pip install --disable-pip-version-check -r $ReqPath
+
+        Write-Step "Validando sintaxis de agent.py"
+        $compileOutput = & $PyExe -m py_compile $AgentPyPath 2>&1
+        if ($LASTEXITCODE -ne 0) {{
+            Write-ErrorStep "agent.py tiene error de sintaxis"
+            $compileOutput | ForEach-Object {{ Write-Host $_ -ForegroundColor Red }}
+            exit 1
+        }}
 
         Write-Step "Ejecutando enroll"
-        & $PyExe (Join-Path $InstallRoot "agent.py") --enroll --config $ConfigPath
+        & $PyExe $AgentPyPath --enroll --config $ConfigPath
+        if ($LASTEXITCODE -ne 0) {{
+            Write-ErrorStep "Enroll falló. No se creó tarea programada."
+            exit 1
+        }}
 
         $taskAction = New-ScheduledTaskAction -Execute $PyExe -Argument "`"$InstallRoot\\agent.py`" --run --config `"$ConfigPath`""
         $triggerStartup = New-ScheduledTaskTrigger -AtStartup
@@ -257,8 +273,17 @@ def build_windows_installer(server_url: str, token: str):
             Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerLogin) -Force | Out-Null
         }}
 
-        Start-ScheduledTask -TaskName "BuhoAgent" | Out-Null
-        Write-Host "Instalación completa. Revisa /agents/overview en Buho para validar estado ONLINE." -ForegroundColor Green
+        try {{
+            Start-ScheduledTask -TaskName "BuhoAgent" | Out-Null
+        }} catch {{
+            Write-ErrorStep "No se pudo iniciar la tarea programada BuhoAgent."
+            Write-Host $_ -ForegroundColor Red
+            exit 1
+        }}
+
+        Write-Host "[BuhoAgent] Instalación completa ✅" -ForegroundColor Green
+        Write-Host "[BuhoAgent] Logs: C:\\ProgramData\\BuhoAgent\\buho-agent.log" -ForegroundColor Green
+        Write-Host "[BuhoAgent] Verifica ONLINE en: $BuhoUrl/agents/overview" -ForegroundColor Green
         """
     ).strip() + "\n"
 
@@ -318,6 +343,8 @@ class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     def get(self, request):
         latest_token = self.scoped_tokens(request).first()
         server_url = request.build_absolute_uri('/').rstrip('/')
+        loopback_hosts = {'127.0.0.1', 'localhost'}
+        show_remote_hint = request.get_host().split(':')[0].lower() in loopback_hosts
         return render(
             request,
             'agents/install.html',
@@ -325,6 +352,7 @@ class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
                 'form': TokenCreateForm(),
                 'latest_token': latest_token,
                 'server_url': server_url,
+                'show_remote_hint': show_remote_hint,
                 'can_manage_tokens': request.user.role in {'SUPERADMIN', 'ORG_ADMIN'},
             },
         )

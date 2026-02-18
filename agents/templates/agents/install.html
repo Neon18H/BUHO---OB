@@ -19,6 +19,11 @@
 <div class="card p-3">
   <div class="mb-2"><strong>Buho Server URL:</strong> <code>{{ server_url }}</code></div>
   <div class="mb-2"><strong>Token:</strong> <code id="tokenText">{{ latest_token.token }}</code></div>
+  {% if show_remote_hint %}
+  <div class="alert alert-warning">
+    Estás usando <code>127.0.0.1/localhost</code> en la URL de Buho. Si instalas en otro equipo, cambia <code>127.0.0.1</code> por la IP/DNS del servidor Buho.
+  </div>
+  {% endif %}
   <label class="form-label">Instalación Windows (recomendada)</label>
   <pre id="cmdWin">iwr -useb {{ server_url }}/agents/download/windows.ps1?token={{ latest_token.token }} | iex</pre>
   <button class="btn btn-outline-primary btn-sm mb-3" onclick="copyFrom('cmdWin')">Copiar comando</button>
@@ -37,6 +42,7 @@
       <li>PowerShell 5+ y Python 3 en PATH.</li>
       <li>Ejecutar como administrador para tarea programada global.</li>
       <li>Logs locales: <code>C:\ProgramData\BuhoAgent\buho-agent.log</code>.</li>
+      <li>Si instalas en otro equipo, cambia <code>127.0.0.1</code> por la IP/DNS del servidor Buho.</li>
     </ul>
   </div>
 </div>
