@@ -11,183 +11,306 @@ from audit.utils import create_audit_log
 from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
-from .models import Agent, AgentEnrollmentToken
+from .models import Agent, AgentEnrollmentToken, DetectedApp
 
 
 AGENT_REQUIREMENTS = "requests\npsutil\n"
 
 
 def build_agent_py():
-    return dedent(
+    return dedent(dedent(
         """
         import argparse
         import json
         import os
         import platform
+        import re
         import socket
+        import subprocess
         import time
+        from collections import Counter, defaultdict
         from datetime import datetime, timezone
         from pathlib import Path
-        from urllib.error import URLError
-        from urllib.request import Request, urlopen
 
-        try:
-            import psutil
-        except Exception:
-            psutil = None
+        import psutil
+        import requests
 
-        try:
-            import requests
-        except Exception:
-            requests = None
-
-        VERSION = "0.2.0"
+        VERSION = "0.3.0"
+        SECRET_PATTERNS = [r"(?i)(authorization:|bearer\\s+)[^\\s]+", r"(?i)(password|token|api[_-]?key)=([^&\\s]+)"]
 
         def utc_now():
             return datetime.now(timezone.utc).isoformat()
 
-        def load_config(path):
+        def redact(text):
+            value = str(text or "")
+            for pattern in SECRET_PATTERNS:
+                value = re.sub(pattern, "[REDACTED]", value)
+            return value
+
+        def load_json(path, default):
             p = Path(path)
             if not p.exists():
-                return {}
-            return json.loads(p.read_text(encoding="utf-8-sig"))
+                return default
+            try:
+                return json.loads(p.read_text(encoding="utf-8-sig"))
+            except Exception:
+                return default
 
-        def save_config(path, cfg):
+        def save_json(path, payload):
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-        def post_json(url, payload, headers=None, timeout=10):
+        def post_json(url, payload, headers=None, timeout=5):
             headers = headers or {}
-            if requests:
-                r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-                return r.status_code, r.json() if r.content else {}
-            data = json.dumps(payload).encode("utf-8")
-            req = Request(url, data=data, headers={"Content-Type": "application/json", **headers}, method="POST")
-            try:
-                with urlopen(req, timeout=timeout) as resp:
-                    raw = resp.read().decode("utf-8")
-                    return resp.status, json.loads(raw) if raw else {}
-            except URLError as exc:
-                raise RuntimeError(str(exc))
-
-        def get_ip_address():
-            try:
-                return socket.gethostbyname(socket.gethostname())
-            except Exception:
-                return "127.0.0.1"
+            response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            return response.status_code, response.json() if response.content else {}
 
         def get_disk_target():
             if os.name == "nt":
                 system_drive = os.environ.get("SystemDrive", "C:")
-                return os.path.join(system_drive, "\\\\")
+                return os.path.join(system_drive, "\\")
             return "/"
 
+        def enqueue_spool(path, event):
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event) + "\n")
+            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]
+            while len("\n".join(lines).encode("utf-8")) > 50 * 1024 * 1024 and lines:
+                lines = lines[1:]
+            p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+        def flush_spool(cfg, headers):
+            p = Path(cfg["spool_file"])
+            if not p.exists():
+                return
+            keep = []
+            for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                try:
+                    status_code, _ = post_json(cfg["server_url"] + item["path"], item["payload"], headers=headers, timeout=5)
+                    if status_code >= 300:
+                        keep.append(line)
+                except Exception:
+                    keep.append(line)
+            p.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+
+        def post_with_retry(cfg, headers, path, payload):
+            for wait in [1, 2, 5, 10, 20, 30, 45, 60]:
+                try:
+                    status_code, _ = post_json(cfg["server_url"] + path, payload, headers=headers, timeout=5)
+                    if status_code < 300:
+                        return True
+                except Exception:
+                    pass
+                time.sleep(wait)
+            enqueue_spool(cfg["spool_file"], {"path": path, "payload": payload})
+            return False
+
         def collect_metrics():
-            if not psutil:
-                return [{"name": "cpu.percent", "value": 0, "unit": "%"}]
-            disk_target = get_disk_target()
-            d = psutil.disk_usage(disk_target)
-            m = psutil.virtual_memory()
-            n = psutil.net_io_counters()
+            root = get_disk_target()
+            vm = psutil.virtual_memory()
+            net = psutil.net_io_counters()
             rows = [
-                {"name": "cpu.percent", "value": psutil.cpu_percent(interval=0.1), "unit": "%"},
-                {"name": "mem.percent", "value": m.percent, "unit": "%"},
-                {"name": "disk.root.used_percent", "value": d.percent, "unit": "%"},
-                {"name": "net.bytes_sent", "value": n.bytes_sent, "unit": "bytes"},
-                {"name": "net.bytes_recv", "value": n.bytes_recv, "unit": "bytes"},
+                {"name": "cpu.percent", "value": psutil.cpu_percent(interval=None), "unit": "%"},
+                {"name": "mem.percent", "value": vm.percent, "unit": "%"},
+                {"name": "mem.used", "value": vm.used, "unit": "bytes"},
+                {"name": "mem.available", "value": vm.available, "unit": "bytes"},
+                {"name": "net.bytes_sent", "value": net.bytes_sent, "unit": "bytes"},
+                {"name": "net.bytes_recv", "value": net.bytes_recv, "unit": "bytes"},
                 {"name": "uptime.seconds", "value": time.time() - psutil.boot_time(), "unit": "seconds"},
             ]
-            if hasattr(os, "getloadavg"):
-                rows.append({"name": "load.1m", "value": os.getloadavg()[0], "unit": "load"})
-            return rows
-
-        def collect_processes(limit=25):
-            if not psutil:
-                return []
-            rows = []
-            for proc in psutil.process_iter(["pid", "name", "username", "cmdline", "cpu_percent", "memory_percent"]):
+            try:
+                rows.append({"name": "swap.percent", "value": psutil.swap_memory().percent, "unit": "%"})
+            except Exception:
+                pass
+            try:
+                rows.append({"name": "disk.root.used_percent", "value": psutil.disk_usage(root).percent, "unit": "%"})
+            except Exception:
+                pass
+            for part in psutil.disk_partitions(all=False):
                 try:
-                    rows.append(
-                        {
-                            "pid": proc.info.get("pid", 0),
-                            "name": (proc.info.get("name") or "unknown")[:255],
-                            "cpu": float(proc.info.get("cpu_percent") or 0),
-                            "mem": float(proc.info.get("memory_percent") or 0),
-                            "user": (proc.info.get("username") or "")[:255],
-                            "cmdline": " ".join(proc.info.get("cmdline") or [])[:500],
-                        }
-                    )
+                    usage = psutil.disk_usage(part.mountpoint)
+                    rows.append({"name": "disk.used_percent", "value": usage.percent, "unit": "%", "labels": {"partition": part.device, "mount": part.mountpoint}})
                 except Exception:
                     continue
-            rows.sort(key=lambda item: (item["cpu"], item["mem"]), reverse=True)
-            return rows[:limit]
+            if hasattr(os, "getloadavg"):
+                l1, l5, l15 = os.getloadavg()
+                rows.extend([
+                    {"name": "load.1m", "value": l1, "unit": "load"},
+                    {"name": "load.5m", "value": l5, "unit": "load"},
+                    {"name": "load.15m", "value": l15, "unit": "load"},
+                ])
+            return rows
 
-        def collect_logs(log_file):
-            p = Path(log_file)
+        def collect_processes_and_apps():
+            listen = defaultdict(list)
+            apps = []
+            try:
+                for conn in psutil.net_connections(kind="inet"):
+                    if conn.status == psutil.CONN_LISTEN and conn.pid:
+                        listen[conn.pid].append(conn.laddr.port)
+            except Exception:
+                pass
+            proc_rows = []
+            for proc in psutil.process_iter(["pid", "name", "username", "cmdline", "cpu_percent", "memory_percent"]):
+                try:
+                    cmdline = redact(" ".join(proc.info.get("cmdline") or []))[:500]
+                    name = (proc.info.get("name") or "unknown")[:255]
+                    proc_rows.append({"pid": proc.info.get("pid", 0), "name": name, "cpu": float(proc.info.get("cpu_percent") or 0), "mem": float(proc.info.get("memory_percent") or 0), "user": (proc.info.get("username") or "")[:255], "cmdline": cmdline})
+                    lowered = f"{name} {cmdline}".lower()
+                    for hint, kind in {"gunicorn": "python-app", "uvicorn": "python-app", "node": "node", "java": "java", "dotnet": ".net", "nginx": "nginx", "apache": "apache", "postgres": "database", "redis": "cache"}.items():
+                        if hint in lowered:
+                            apps.append({"name": name[:120], "kind": kind, "pid": proc.info.get("pid"), "ports": sorted(set(listen.get(proc.info.get("pid"), []))), "metadata": {"cmdline": cmdline}})
+                            break
+                except Exception:
+                    continue
+            proc_rows.sort(key=lambda item: (item["cpu"], item["mem"]), reverse=True)
+            return proc_rows[:50], apps[:100]
+
+        def collect_services():
+            rows = []
+            if os.name == "nt" and hasattr(psutil, "win_service_iter"):
+                for svc in psutil.win_service_iter():
+                    try:
+                        data = svc.as_dict(); rows.append({"name": data.get("name"), "status": data.get("status")})
+                    except Exception:
+                        continue
+            else:
+                try:
+                    output = subprocess.check_output(["systemctl", "list-units", "--type=service", "--state=running", "--no-pager", "--plain"], text=True, stderr=subprocess.DEVNULL)
+                    for line in output.splitlines():
+                        if ".service" in line:
+                            rows.append({"name": line.split()[0], "status": "running"})
+                except Exception:
+                    pass
+            return rows[:200]
+
+        def parse_http_logs(path, state):
+            p = Path(path)
             if not p.exists():
                 return []
-            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()[-10:]
-            return [{"ts": utc_now(), "level": "INFO", "source": "agent", "message": line, "fields": {}} for line in lines]
+            key = f"http::{path}"
+            offset = state.get(key, 0)
+            counts = Counter()
+            with p.open("r", encoding="utf-8", errors="ignore") as handle:
+                handle.seek(offset)
+                for line in handle.readlines()[-5000:]:
+                    match = re.search(r'"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^\s]+)[^"]*"\s+(\d{3})', line)
+                    if not match:
+                        continue
+                    method, endpoint, status_code = match.groups()
+                    status_class = status_code[0] + "xx"
+                    endpoint = endpoint[:120]
+                    counts[(method, endpoint, status_class)] += 1
+                state[key] = handle.tell()
+            points = []
+            for (method, endpoint, status_class), value in counts.items():
+                points.append({"name": "http.requests.count", "value": value, "unit": "count", "labels": {"method": method, "endpoint": endpoint, "status_class": status_class}})
+                if status_class in ("4xx", "5xx"):
+                    points.append({"name": "http.errors.count", "value": value, "unit": "count", "labels": {"method": method, "endpoint": endpoint, "status_class": status_class}})
+            return points
+
+        def collect_logs(cfg, state):
+            output = []
+            for source in cfg.get("logs_sources", []):
+                if source.get("type") != "file":
+                    continue
+                p = Path(source.get("path", ""))
+                if not p.exists():
+                    continue
+                key = f"file::{p}"
+                offset = state.get(key, 0)
+                with p.open("r", encoding="utf-8", errors="ignore") as handle:
+                    handle.seek(offset)
+                    for line in handle.readlines()[-200:]:
+                        msg = redact(line.strip())
+                        if msg:
+                            level = "ERROR" if "error" in msg.lower() else "INFO"
+                            output.append({"ts": utc_now(), "level": level, "source": source.get("name") or p.name, "message": msg, "fields": {}})
+                    state[key] = handle.tell()
+            return output[:200]
 
         def enroll(config_path):
-            cfg = load_config(config_path)
+            cfg = load_json(config_path, {})
             if cfg.get("agent_id") and cfg.get("agent_key"):
                 return cfg
             payload = {
                 "token": cfg["token"],
                 "hostname": socket.gethostname(),
-                "ip_address": get_ip_address(),
+                "ip_address": socket.gethostbyname(socket.gethostname()),
                 "os": platform.platform(),
                 "arch": platform.machine(),
                 "version": VERSION,
                 "name": socket.gethostname(),
             }
-            status_code, data = post_json(f"{cfg['server_url']}/api/agents/enroll", payload)
+            status_code, data = post_json(cfg["server_url"] + "/api/agents/enroll", payload)
             if status_code != 200:
                 raise RuntimeError(f"enroll failed: {status_code}")
             cfg["agent_id"] = data["agent_id"]
             cfg["agent_key"] = data["agent_key"]
-            save_config(config_path, cfg)
+            cfg.setdefault("spool_file", str(Path(config_path).with_name("spool.jsonl")))
+            save_json(config_path, cfg)
             return cfg
 
         def run_loop(config_path, once=False):
-            cfg = load_config(config_path)
             cfg = enroll(config_path)
+            cfg.setdefault("heartbeat_interval", 15)
+            cfg.setdefault("metrics_interval", 15)
+            cfg.setdefault("processes_interval", 30)
+            cfg.setdefault("logs_interval", 15)
+            cfg.setdefault("logs_sources", [{"type": "file", "path": cfg.get("log_file", "buho-agent.log"), "name": "agent"}])
+            cfg.setdefault("http_logs", [])
             headers = {"X-Buho-Agent-Id": str(cfg["agent_id"]), "X-Buho-Agent-Key": cfg["agent_key"]}
-            heartbeat_interval = int(cfg.get("heartbeat_interval", 15))
-            metrics_interval = int(cfg.get("metrics_interval", 10))
-            processes_interval = int(cfg.get("processes_interval", 15))
-            last_heartbeat = 0
-            last_metrics = 0
-            last_processes = 0
-            backoff = 2
-
+            state_path = str(Path(config_path).with_name("state.json"))
+            state = load_json(state_path, {})
+            last = defaultdict(float)
+            sent_logs_minute = 0
+            minute_bucket = int(time.time() // 60)
             while True:
-                now = time.time()
                 try:
-                    if now - last_heartbeat >= heartbeat_interval:
-                        post_json(f"{cfg['server_url']}/api/agents/heartbeat", {"status": "ONLINE", "metadata": {"agent_version": VERSION}}, headers)
-                        last_heartbeat = now
-                    if now - last_metrics >= metrics_interval:
-                        post_json(f"{cfg['server_url']}/api/ingest/metrics", {"ts": utc_now(), "metrics": collect_metrics()}, headers)
-                        post_json(f"{cfg['server_url']}/api/ingest/logs", {"logs": collect_logs(cfg.get("log_file", "buho-agent.log"))}, headers)
-                        last_metrics = now
-                    if now - last_processes >= processes_interval:
-                        post_json(f"{cfg['server_url']}/api/ingest/processes", {"ts": utc_now(), "processes": collect_processes()}, headers)
-                        last_processes = now
-                    backoff = 2
+                    now = time.time()
+                    if int(now // 60) != minute_bucket:
+                        minute_bucket = int(now // 60)
+                        sent_logs_minute = 0
+                    flush_spool(cfg, headers)
+                    if now - last["heartbeat"] >= cfg["heartbeat_interval"]:
+                        post_with_retry(cfg, headers, "/api/agents/heartbeat", {"status": "ONLINE", "metadata": {"agent_version": VERSION}})
+                        last["heartbeat"] = now
+                    if now - last["metrics"] >= cfg["metrics_interval"]:
+                        metrics = collect_metrics()
+                        for path in cfg.get("http_logs", []):
+                            metrics.extend(parse_http_logs(path, state))
+                        post_with_retry(cfg, headers, "/api/ingest/metrics", {"ts": utc_now(), "metrics": metrics})
+                        last["metrics"] = now
+                    if now - last["processes"] >= cfg["processes_interval"]:
+                        processes, apps = collect_processes_and_apps()
+                        services = [{"name": item.get("name"), "kind": "service", "ports": [], "metadata": {"status": item.get("status")}} for item in collect_services()]
+                        post_with_retry(cfg, headers, "/api/ingest/processes", {"ts": utc_now(), "processes": processes})
+                        post_with_retry(cfg, headers, "/api/ingest/apps", {"ts": utc_now(), "apps": apps + services})
+                        last["processes"] = now
+                    if now - last["logs"] >= cfg["logs_interval"]:
+                        logs = collect_logs(cfg, state)
+                        remaining = max(0, 2000 - sent_logs_minute)
+                        logs = logs[:remaining]
+                        if logs:
+                            post_with_retry(cfg, headers, "/api/ingest/logs", {"logs": logs})
+                            sent_logs_minute += len(logs)
+                        last["logs"] = now
+                    save_json(state_path, state)
                     if once:
                         return
                     time.sleep(1)
                 except Exception as exc:
-                    Path(cfg.get("log_file", "buho-agent.log")).parent.mkdir(parents=True, exist_ok=True)
                     with open(cfg.get("log_file", "buho-agent.log"), "a", encoding="utf-8") as handle:
-                        handle.write(f"{utc_now()} loop-error {exc}\\n")
+                        handle.write(f"{utc_now()} loop-error {exc}\n")
                     if once:
                         raise
-                    time.sleep(backoff)
-                    backoff = min(backoff * 2, 60)
+                    time.sleep(5)
 
         def main():
             parser = argparse.ArgumentParser(description="Buho Agent")
@@ -207,7 +330,7 @@ def build_agent_py():
         if __name__ == "__main__":
             main()
         """
-    ).strip() + "\n"
+    )).strip() + "\n"
 
 
 def build_windows_installer(server_url: str, token: str):
@@ -281,10 +404,10 @@ def build_windows_installer(server_url: str, token: str):
 
         try {{
             Write-Step "Creando tarea programada global BuhoAgent"
-            Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerStartup, $triggerLogin) -RunLevel Highest -Force | Out-Null
+            Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerStartup, $triggerLogin) -Principal $principal -Settings $settings -Force | Out-Null
         }} catch {{
             Write-Host "No se pudo crear tarea global (sin admin). Intentando tarea en contexto de usuario..." -ForegroundColor Yellow
-            Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerLogin) -Force | Out-Null
+            Register-ScheduledTask -TaskName "BuhoAgent" -Action $taskAction -Trigger @($triggerLogin) -Settings $settings -Force | Out-Null
         }}
 
         try {{
@@ -323,9 +446,12 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
     def get(self, request):
         agents = self.scoped_agents(request)
-        cutoff = timezone.now() - timedelta(seconds=90)
-        agents.filter(last_seen__lt=cutoff).exclude(status=Agent.Status.OFFLINE).update(status=Agent.Status.OFFLINE)
-        agents.filter(last_seen__gte=cutoff).exclude(status=Agent.Status.ONLINE).update(status=Agent.Status.ONLINE)
+        now = timezone.now()
+        offline_cutoff = now - timedelta(seconds=90)
+        degraded_cutoff = now - timedelta(seconds=30)
+        agents.filter(last_seen__lt=offline_cutoff).exclude(status=Agent.Status.OFFLINE).update(status=Agent.Status.OFFLINE)
+        agents.filter(last_seen__lt=degraded_cutoff, last_seen__gte=offline_cutoff).exclude(status=Agent.Status.DEGRADED).update(status=Agent.Status.DEGRADED)
+        agents.filter(last_seen__gte=degraded_cutoff).exclude(status=Agent.Status.ONLINE).update(status=Agent.Status.ONLINE)
         create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='AgentList', metadata={'count': agents.count()})
         return render(
             request,
@@ -347,7 +473,8 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     def get(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
         create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='Agent', target_id=str(agent.id))
-        return render(request, 'agents/detail.html', {'agent': agent, 'heartbeats': agent.heartbeats.all()[:20]})
+        apps = DetectedApp.objects.filter(agent=agent).order_by('-last_seen')[:50]
+        return render(request, 'agents/detail.html', {'agent': agent, 'heartbeats': agent.heartbeats.all()[:20], 'apps': apps})
 
 
 class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
@@ -456,11 +583,33 @@ INSTALL_DIR="$HOME/.buho-agent"
 mkdir -p "$INSTALL_DIR"
 curl -fsSL {server_url}/agents/download/agent.py -o "$INSTALL_DIR/agent.py"
 cat > "$INSTALL_DIR/config.json" <<EOF
-{{"server_url":"{server_url}","token":"{token}","heartbeat_interval":15,"metrics_interval":10,"processes_interval":15,"log_file":"$INSTALL_DIR/buho-agent.log"}}
+{{"server_url":"{server_url}","token":"{token}","heartbeat_interval":15,"metrics_interval":15,"processes_interval":30,"logs_interval":15,"log_file":"$INSTALL_DIR/buho-agent.log","spool_file":"$INSTALL_DIR/spool.jsonl","logs_sources":[{{"type":"file","path":"$INSTALL_DIR/buho-agent.log","name":"agent"}}],"http_logs":["/var/log/nginx/access.log","/var/log/apache2/access.log"]}}
 EOF
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install -r <(curl -fsSL {server_url}/agents/download/requirements.txt) || true
-nohup "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/agent.py" --run --config "$INSTALL_DIR/config.json" >/dev/null 2>&1 &
+if command -v systemctl >/dev/null 2>&1; then
+  mkdir -p "$HOME/.config/systemd/user"
+  cat > "$HOME/.config/systemd/user/buho-agent.service" <<UNIT
+[Unit]
+Description=Buho Agent
+After=network-online.target
+
+[Service]
+ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/agent.py --run --config $INSTALL_DIR/config.json
+WorkingDirectory=$INSTALL_DIR
+Restart=always
+RestartSec=5
+StandardOutput=append:$INSTALL_DIR/buho-agent.log
+StandardError=append:$INSTALL_DIR/buho-agent.log
+
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload || true
+  systemctl --user enable --now buho-agent.service || true
+else
+  nohup "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/agent.py" --run --config "$INSTALL_DIR/config.json" >>"$INSTALL_DIR/buho-agent.log" 2>&1 &
+fi
 """
         )
         response = HttpResponse(script, content_type='text/x-shellscript')

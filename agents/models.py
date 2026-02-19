@@ -138,6 +138,8 @@ class Incident(models.Model):
         CPU_SPIKE = 'CPU_SPIKE', 'CPU > 90% (3 samples)'
         DISK_CRITICAL = 'DISK_CRITICAL', 'Disk root > 90%'
         LOG_ERROR_FLOOD = 'LOG_ERROR_FLOOD', 'Error logs flood'
+        AGENT_OFFLINE = 'AGENT_OFFLINE', 'Agent heartbeat missing'
+        HTTP_5XX_SPIKE = 'HTTP_5XX_SPIKE', 'HTTP 5xx spike'
 
     class Severity(models.TextChoices):
         LOW = 'LOW', 'Low'
@@ -168,3 +170,19 @@ class AgentDownload(models.Model):
     platform = models.CharField(max_length=30)
     version = models.CharField(max_length=50, default='demo')
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class DetectedApp(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='detected_apps')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='detected_apps')
+    kind = models.CharField(max_length=64)
+    name = models.CharField(max_length=120)
+    pid = models.IntegerField(null=True, blank=True)
+    ports_json = models.JSONField(default=list, blank=True)
+    metadata_json = models.JSONField(default=dict, blank=True)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ('name',)
+        indexes = [models.Index(fields=['organization', 'agent', 'kind', 'last_seen'])]

@@ -6,12 +6,12 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from agents.incidents import evaluate_log_incidents, evaluate_metric_incidents
-from agents.models import Agent, AgentEnrollmentToken, AgentHeartbeat, LogEntry, MetricPoint, ProcessSample
+from agents.incidents import evaluate_http_incidents, evaluate_log_incidents, evaluate_metric_incidents
+from agents.models import Agent, AgentEnrollmentToken, AgentHeartbeat, DetectedApp, LogEntry, MetricPoint, ProcessSample
 from agents.security import redact_payload, redact_text
 from audit.models import AuditLog
 
-from .serializers import EnrollSerializer, HeartbeatSerializer, LogsSerializer, MetricsSerializer, ProcessesSerializer
+from .serializers import AppsSerializer, EnrollSerializer, HeartbeatSerializer, LogsSerializer, MetricsSerializer, ProcessesSerializer
 
 
 class AgentAuthMixin:
@@ -122,6 +122,7 @@ class AgentMetricsIngestApiView(APIView, AgentAuthMixin):
         ]
         MetricPoint.objects.bulk_create(rows)
         evaluate_metric_incidents(agent.organization, agent)
+        evaluate_http_incidents(agent.organization, agent)
         return Response({'ingested': len(rows)})
 
 
@@ -181,3 +182,31 @@ class AgentLogsIngestApiView(APIView, AgentAuthMixin):
             LogEntry.objects.bulk_create(rows)
         evaluate_log_incidents(agent.organization, agent)
         return Response({'ingested': len(rows)})
+
+
+class AgentAppsIngestApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        agent = self.get_agent_from_headers(request)
+        if not agent:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+        serializer = AppsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ts = serializer.validated_data.get('ts') or timezone.now()
+        for item in serializer.validated_data['apps']:
+            defaults = {
+                'kind': item.get('kind', 'unknown')[:64],
+                'ports_json': item.get('ports') or [],
+                'metadata_json': redact_payload(item.get('metadata') or {}),
+                'last_seen': ts,
+            }
+            DetectedApp.objects.update_or_create(
+                organization=agent.organization,
+                agent=agent,
+                name=(item.get('name') or 'unknown')[:120],
+                pid=item.get('pid') or None,
+                defaults=defaults,
+            )
+        return Response({'ingested': len(serializer.validated_data['apps'])})
