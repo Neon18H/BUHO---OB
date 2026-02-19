@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login as auth_login
 from django.contrib.auth.views import LoginView, LogoutView
-from django.db.models import Avg, Max, Sum
+from django.db.models import Avg, Max, Q, Sum
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -125,13 +125,25 @@ class OverviewView(RoleRequiredMixin, OrgScopedMixin, View):
         _sync_agent_status_for_org(org)
         now = timezone.now()
         offline_seconds = getattr(settings, 'AGENT_OFFLINE_SECONDS', 90)
-        window_15m = now - timedelta(minutes=15)
+        time_range = request.GET.get('time_range', '15m')
+        minutes_map = {'15m': 15, '1h': 60, '24h': 1440}
+        window_minutes = minutes_map.get(time_range, 15)
+        window_15m = now - timedelta(minutes=window_minutes)
         window_1h = now - timedelta(hours=1)
 
         if not org:
             return render(request, 'ui/overview.html', {'empty': True, 'selected_agent': None, 'agents': []})
 
         agents = Agent.objects.filter(organization=org)
+        provider = request.GET.get('provider', '')
+        env = request.GET.get('env', '')
+        tag = request.GET.get('tag', '').strip()
+        if provider:
+            agents = agents.filter(provider=provider)
+        if env:
+            agents = agents.filter(environment=env)
+        if tag:
+            agents = agents.filter(tags_json__contains=[tag])
         online_qs = agents.filter(last_seen__gte=now - timedelta(seconds=offline_seconds), status=Agent.Status.ONLINE)
         online_ids = list(online_qs.values_list('id', flat=True))
 
@@ -190,6 +202,10 @@ class OverviewView(RoleRequiredMixin, OrgScopedMixin, View):
             'recent_logs': LogEntry.objects.filter(organization=org).order_by('-ts')[:50],
             'recent_heartbeats': selected_agent.heartbeats.all()[:10] if selected_agent else [],
             'recent_incidents': Incident.objects.filter(organization=org).order_by('-last_seen')[:10],
+            'providers': Agent.Provider.choices,
+            'envs': Agent.Environment.choices,
+            'filters': {'provider': provider, 'env': env, 'tag': tag, 'time_range': time_range},
+            'top_offenders': Agent.objects.filter(organization=org).order_by('health_score')[:5],
         }
         return render(request, 'ui/overview.html', context)
 
@@ -241,8 +257,38 @@ class AppsListView(RoleRequiredMixin, OrgScopedMixin, View):
 
     def get(self, request):
         org = self.get_org(request)
+        provider = request.GET.get('provider', '')
+        env = request.GET.get('env', '')
+        agent_id = request.GET.get('agent', '')
         apps = DetectedApp.objects.filter(organization=org).select_related('agent').order_by('-last_seen') if org else DetectedApp.objects.none()
-        return render(request, 'ui/apps.html', {'apps': apps[:200]})
+        if provider:
+            apps = apps.filter(agent__provider=provider)
+        if env:
+            apps = apps.filter(agent__environment=env)
+        if agent_id:
+            apps = apps.filter(agent_id=agent_id)
+        return render(request, 'ui/apps.html', {'apps': apps[:200], 'providers': Agent.Provider.choices, 'envs': Agent.Environment.choices, 'agents': Agent.objects.filter(organization=org), 'filters': {'provider': provider, 'env': env, 'agent': agent_id}})
+
+
+class AppDetailView(RoleRequiredMixin, OrgScopedMixin, View):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+
+    def get(self, request, app_id):
+        org = self.get_org(request)
+        app = get_object_or_404(DetectedApp.objects.filter(organization=org).select_related('agent'), id=app_id)
+        metrics = MetricPoint.objects.filter(organization=org, agent=app.agent, ts__gte=timezone.now() - timedelta(hours=1), name__in=['cpu.percent', 'mem.percent', 'http.requests.count', 'http.errors.count']).order_by('ts')
+        labels, cpu_values, mem_values = [], [], []
+        grouped = {}
+        for point in metrics:
+            key = point.ts.replace(second=0, microsecond=0)
+            grouped.setdefault(key, {})[point.name] = grouped.setdefault(key, {}).get(point.name, 0) + point.value
+        for ts_key in sorted(grouped.keys()):
+            labels.append(ts_key.strftime('%H:%M'))
+            cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
+            mem_values.append(grouped[ts_key].get('mem.percent', 0))
+        app_logs = LogEntry.objects.filter(organization=org, agent=app.agent).filter(Q(source__icontains=app.name) | Q(fields_json__app_hint=app.name)).order_by('-ts')[:150]
+        deploy_hint = f"Detectado: {app.agent.get_provider_display()} + {app.runtime or 'runtime-unknown'} + {app.framework or 'framework-unknown'}"
+        return render(request, 'ui/app_detail.html', {'app': app, 'labels': labels, 'cpu_values': cpu_values, 'mem_values': mem_values, 'app_logs': app_logs, 'deploy_hint': deploy_hint})
 
 
 class LogsExplorerView(RoleRequiredMixin, OrgScopedMixin, View):

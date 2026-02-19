@@ -12,7 +12,7 @@ from audit.utils import create_audit_log
 from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
-from .models import Agent, AgentEnrollmentToken, DetectedApp
+from .models import Agent, AgentEnrollmentToken, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample
 
 
 AGENT_REQUIREMENTS = "requests\npsutil\n"
@@ -193,6 +193,49 @@ def build_agent_py():
                     pass
             return rows[:200]
 
+        def detect_provider_and_apps():
+            env = os.environ
+            hints = {}
+            provider = "OTHER"
+            if any(k.startswith("RAILWAY_") for k in env):
+                provider = "RAILWAY"
+                hints["railway"] = True
+            elif any(k.startswith("AWS_") for k in env):
+                provider = "AWS"
+            elif env.get("WEBSITE_INSTANCE_ID"):
+                provider = "AZURE"
+            elif env.get("GOOGLE_CLOUD_PROJECT"):
+                provider = "GCP"
+            elif os.path.exists("/.dockerenv"):
+                provider = "ON_PREM"
+            apps = []
+            listen = defaultdict(list)
+            for conn in psutil.net_connections(kind="inet"):
+                if conn.status == psutil.CONN_LISTEN and conn.pid and conn.laddr:
+                    listen[conn.pid].append(conn.laddr.port)
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    name = (proc.info.get("name") or "").lower()
+                    cmd = " ".join(proc.info.get("cmdline") or []).lower()
+                    runtime, framework, server = "", "", ""
+                    if "gunicorn" in cmd or "uvicorn" in cmd or "python" in name:
+                        runtime = "python"
+                        if "django" in cmd or "manage.py" in cmd or env.get("DJANGO_SETTINGS_MODULE"):
+                            framework = "django"
+                    if "node" in name or "pm2" in cmd:
+                        runtime = "node"
+                    if "java" in name:
+                        runtime = "java"
+                    if "dotnet" in name:
+                        runtime = "dotnet"
+                    if "nginx" in name:
+                        server = "nginx"
+                    if runtime or server:
+                        apps.append({"name": proc.info.get("name") or f"pid-{proc.info.get('pid')}", "kind": "web", "runtime": runtime, "framework": framework, "server": server, "pid": proc.info.get("pid"), "ports": sorted(set(listen.get(proc.info.get("pid"), []))), "process_hints": {"cmdline": cmd}, "metadata": {}})
+                except Exception:
+                    continue
+            return provider, hints, apps
+
         def parse_http_logs(path, state):
             p = Path(path)
             if not p.exists():
@@ -266,6 +309,7 @@ def build_agent_py():
             cfg.setdefault("metrics_interval", 15)
             cfg.setdefault("processes_interval", 30)
             cfg.setdefault("logs_interval", 15)
+            cfg.setdefault("discovery_interval", 300)
             cfg.setdefault("logs_sources", [{"type": "file", "path": cfg.get("log_file", "buho-agent.log"), "name": "agent"}])
             cfg.setdefault("http_logs", [])
             headers = {"X-Buho-Agent-Id": str(cfg["agent_id"]), "X-Buho-Agent-Key": cfg["agent_key"]}
@@ -296,6 +340,10 @@ def build_agent_py():
                         post_with_retry(cfg, headers, "/api/ingest/processes", {"ts": utc_now(), "processes": processes})
                         post_with_retry(cfg, headers, "/api/ingest/apps", {"ts": utc_now(), "apps": apps + services})
                         last["processes"] = now
+                    if now - last["discovery"] >= cfg["discovery_interval"]:
+                        provider, hints, discovered_apps = detect_provider_and_apps()
+                        post_with_retry(cfg, headers, "/api/ingest/discovery", {"ts": utc_now(), "provider": provider, "tags": cfg.get("tags", []), "cloud_metadata": {"hostname": socket.gethostname()}, "hints": hints, "apps": discovered_apps})
+                        last["discovery"] = now
                     if now - last["logs"] >= cfg["logs_interval"]:
                         logs = collect_logs(cfg, state)
                         remaining = max(0, 2000 - sent_logs_minute)
@@ -466,6 +514,12 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
     def get(self, request):
         agents = self.scoped_agents(request)
+        provider = request.GET.get('provider', '')
+        env = request.GET.get('env', '')
+        if provider:
+            agents = agents.filter(provider=provider)
+        if env:
+            agents = agents.filter(environment=env)
         now = timezone.now()
         offline_cutoff = now - timedelta(seconds=90)
         degraded_cutoff = now - timedelta(seconds=30)
@@ -482,6 +536,9 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
                 'online_count': agents.filter(status=Agent.Status.ONLINE).count(),
                 'offline_count': agents.filter(status=Agent.Status.OFFLINE).count(),
                 'degraded_count': agents.filter(status=Agent.Status.DEGRADED).count(),
+                'providers': Agent.Provider.choices,
+                'envs': Agent.Environment.choices,
+                'filters': {'provider': provider, 'env': env},
             },
         )
 
@@ -493,8 +550,28 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     def get(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
         create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='Agent', target_id=str(agent.id))
-        apps = DetectedApp.objects.filter(agent=agent).order_by('-last_seen')[:50]
-        return render(request, 'agents/detail.html', {'agent': agent, 'heartbeats': agent.heartbeats.all()[:20], 'apps': apps})
+        time_range = request.GET.get('time_range', '1h')
+        minutes = {'15m': 15, '1h': 60, '24h': 1440}.get(time_range, 60)
+        since = timezone.now() - timedelta(minutes=minutes)
+        apps = DetectedApp.objects.filter(agent=agent).order_by('-last_seen')[:100]
+        metrics = MetricPoint.objects.filter(agent=agent, ts__gte=since, name__in=['cpu.percent', 'mem.percent', 'disk.root.used_percent', 'net.bytes_recv', 'net.bytes_sent']).order_by('ts')
+        labels, cpu_values, mem_values, disk_values, net_in, net_out = [], [], [], [], [], []
+        grouped = {}
+        for point in metrics:
+            key = point.ts.replace(second=0, microsecond=0)
+            grouped.setdefault(key, {})[point.name] = point.value
+        for ts_key in sorted(grouped):
+            labels.append(ts_key.strftime('%H:%M'))
+            cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
+            mem_values.append(grouped[ts_key].get('mem.percent', 0))
+            disk_values.append(grouped[ts_key].get('disk.root.used_percent', 0))
+            net_in.append(grouped[ts_key].get('net.bytes_recv', 0))
+            net_out.append(grouped[ts_key].get('net.bytes_sent', 0))
+        logs = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
+        incidents = Incident.objects.filter(agent=agent).order_by('-last_seen')[:100]
+        latest_process_ts = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
+        processes = ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu')[:50] if latest_process_ts else []
+        return render(request, 'agents/detail.html', {'agent': agent, 'heartbeats': agent.heartbeats.all()[:20], 'apps': apps, 'labels': labels, 'cpu_values': cpu_values, 'mem_values': mem_values, 'disk_values': disk_values, 'net_in': net_in, 'net_out': net_out, 'logs': logs, 'incidents': incidents, 'processes': processes, 'time_range': time_range})
 
 
 class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):

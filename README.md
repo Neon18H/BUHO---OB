@@ -81,3 +81,12 @@ El agente descargable (`/agents/download/agent.py`) ahora incorpora:
 2. Ejecuta `python agent.py --run --config config.json --once` para validar conectividad y credenciales.
 3. Revisa que el reloj del host sea correcto (desfases grandes afectan ventanas de heartbeat).
 4. En Buho, ejecutar `python manage.py evaluate_alerts` para recalcular alertas de heartbeat faltante.
+
+## Provider/Discovery testing (local)
+
+- Simular **Railway**: ejecutar agente con variables `RAILWAY_ENVIRONMENT=production RAILWAY_PROJECT_ID=demo`.
+- Simular **AWS**: exportar `AWS_REGION=us-east-1 AWS_EXECUTION_ENV=local-test`.
+- Simular **Azure**: exportar `WEBSITE_INSTANCE_ID=demo-azure`.
+- Simular **GCP**: exportar `GOOGLE_CLOUD_PROJECT=demo-project`.
+- Forzar tags/env en config del agente (`tags`, `environment`) y validar en UI de Overview/Agents/Apps.
+- Endpoint de discovery: `POST /api/ingest/discovery` (usa cabeceras `X-Buho-Agent-Id` y `X-Buho-Agent-Key`).

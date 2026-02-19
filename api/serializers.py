@@ -35,3 +35,14 @@ class LogsSerializer(serializers.Serializer):
 class AppsSerializer(serializers.Serializer):
     ts = serializers.DateTimeField(required=False)
     apps = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+
+
+class DiscoverySerializer(serializers.Serializer):
+    ts = serializers.DateTimeField(required=False)
+    provider = serializers.ChoiceField(choices=Agent.Provider.choices, required=False)
+    environment = serializers.ChoiceField(choices=Agent.Environment.choices, required=False)
+    tags = serializers.ListField(child=serializers.CharField(), required=False)
+    region = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    cloud_metadata = serializers.JSONField(required=False)
+    hints = serializers.JSONField(required=False)
+    apps = serializers.ListField(child=serializers.DictField(), required=False)

@@ -42,6 +42,19 @@ class AgentEnrollmentToken(models.Model):
 
 
 class Agent(models.Model):
+    class Provider(models.TextChoices):
+        AWS = 'AWS', 'AWS'
+        AZURE = 'AZURE', 'Azure'
+        GCP = 'GCP', 'GCP'
+        RAILWAY = 'RAILWAY', 'Railway'
+        ON_PREM = 'ON_PREM', 'On-Prem'
+        OTHER = 'OTHER', 'Other'
+
+    class Environment(models.TextChoices):
+        DEV = 'DEV', 'Dev'
+        STAGE = 'STAGE', 'Stage'
+        PROD = 'PROD', 'Prod'
+
     class Status(models.TextChoices):
         ONLINE = 'ONLINE', 'Online'
         OFFLINE = 'OFFLINE', 'Offline'
@@ -55,6 +68,12 @@ class Agent(models.Model):
     arch = models.CharField(max_length=32, default='x86_64')
     version = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OFFLINE)
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.OTHER)
+    environment = models.CharField(max_length=20, choices=Environment.choices, default=Environment.PROD)
+    tags_json = models.JSONField(default=list, blank=True)
+    region = models.CharField(max_length=64, blank=True)
+    cloud_metadata_json = models.JSONField(default=dict, blank=True)
+    health_score = models.PositiveSmallIntegerField(default=100)
     last_seen = models.DateTimeField(null=True, blank=True)
     enrolled_at = models.DateTimeField(default=timezone.now)
     agent_key_hash = models.CharField(max_length=256, blank=True)
@@ -177,12 +196,28 @@ class DetectedApp(models.Model):
     agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='detected_apps')
     kind = models.CharField(max_length=64)
     name = models.CharField(max_length=120)
+    runtime = models.CharField(max_length=64, blank=True)
+    framework = models.CharField(max_length=64, blank=True)
+    server = models.CharField(max_length=64, blank=True)
     pid = models.IntegerField(null=True, blank=True)
     ports_json = models.JSONField(default=list, blank=True)
+    process_hints_json = models.JSONField(default=dict, blank=True)
     metadata_json = models.JSONField(default=dict, blank=True)
+    app_health_score = models.PositiveSmallIntegerField(default=100)
     first_seen = models.DateTimeField(default=timezone.now)
     last_seen = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ('name',)
         indexes = [models.Index(fields=['organization', 'agent', 'kind', 'last_seen'])]
+
+
+class AppServiceMap(models.Model):
+    app = models.ForeignKey(DetectedApp, on_delete=models.CASCADE, related_name='service_maps')
+    service_name = models.CharField(max_length=64)
+    service_kind = models.CharField(max_length=64)
+    port = models.PositiveIntegerField(null=True, blank=True)
+    metadata_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('service_name',)

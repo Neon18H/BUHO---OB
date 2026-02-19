@@ -7,11 +7,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from agents.incidents import evaluate_http_incidents, evaluate_log_incidents, evaluate_metric_incidents
+from agents.health import calculate_agent_health, calculate_app_health
 from agents.models import Agent, AgentEnrollmentToken, AgentHeartbeat, DetectedApp, LogEntry, MetricPoint, ProcessSample
 from agents.security import redact_payload, redact_text
 from audit.models import AuditLog
 
-from .serializers import AppsSerializer, EnrollSerializer, HeartbeatSerializer, LogsSerializer, MetricsSerializer, ProcessesSerializer
+from .serializers import AppsSerializer, DiscoverySerializer, EnrollSerializer, HeartbeatSerializer, LogsSerializer, MetricsSerializer, ProcessesSerializer
 
 
 class AgentAuthMixin:
@@ -94,7 +95,10 @@ class AgentHeartbeatApiView(APIView, AgentAuthMixin):
         agent.status = serializer.validated_data.get('status', Agent.Status.ONLINE)
         agent.save(update_fields=['last_seen', 'status'])
         AgentHeartbeat.objects.create(agent=agent, status=agent.status, metadata_json=serializer.validated_data.get('metadata') or {})
-        return Response({'ok': True, 'last_seen': agent.last_seen})
+        health, reasons = calculate_agent_health(agent)
+        agent.health_score = health
+        agent.save(update_fields=['health_score'])
+        return Response({'ok': True, 'last_seen': agent.last_seen, 'health_score': health, 'reasons': reasons})
 
 
 class AgentMetricsIngestApiView(APIView, AgentAuthMixin):
@@ -123,7 +127,10 @@ class AgentMetricsIngestApiView(APIView, AgentAuthMixin):
         MetricPoint.objects.bulk_create(rows)
         evaluate_metric_incidents(agent.organization, agent)
         evaluate_http_incidents(agent.organization, agent)
-        return Response({'ingested': len(rows)})
+        health, _ = calculate_agent_health(agent)
+        agent.health_score = health
+        agent.save(update_fields=['health_score'])
+        return Response({'ingested': len(rows), 'health_score': health})
 
 
 class AgentProcessesIngestApiView(APIView, AgentAuthMixin):
@@ -181,7 +188,10 @@ class AgentLogsIngestApiView(APIView, AgentAuthMixin):
                 )
             LogEntry.objects.bulk_create(rows)
         evaluate_log_incidents(agent.organization, agent)
-        return Response({'ingested': len(rows)})
+        health, _ = calculate_agent_health(agent)
+        agent.health_score = health
+        agent.save(update_fields=['health_score'])
+        return Response({'ingested': len(rows), 'health_score': health})
 
 
 class AgentAppsIngestApiView(APIView, AgentAuthMixin):
@@ -210,3 +220,56 @@ class AgentAppsIngestApiView(APIView, AgentAuthMixin):
                 defaults=defaults,
             )
         return Response({'ingested': len(serializer.validated_data['apps'])})
+
+
+class AgentDiscoveryIngestApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        agent = self.get_agent_from_headers(request)
+        if not agent:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+        serializer = DiscoverySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ts = serializer.validated_data.get('ts') or timezone.now()
+        tags = serializer.validated_data.get('tags') or []
+        agent.provider = serializer.validated_data.get('provider') or agent.provider
+        agent.environment = serializer.validated_data.get('environment') or agent.environment
+        agent.tags_json = tags
+        agent.region = serializer.validated_data.get('region', agent.region)
+        merged_meta = agent.cloud_metadata_json or {}
+        merged_meta.update(serializer.validated_data.get('cloud_metadata') or {})
+        merged_meta['hints'] = serializer.validated_data.get('hints') or {}
+        agent.cloud_metadata_json = merged_meta
+        agent.last_seen = timezone.now()
+        agent.save(update_fields=['provider', 'environment', 'tags_json', 'region', 'cloud_metadata_json', 'last_seen'])
+
+        for item in serializer.validated_data.get('apps') or []:
+            defaults = {
+                'kind': item.get('kind', 'unknown')[:64],
+                'runtime': (item.get('runtime') or '')[:64],
+                'framework': (item.get('framework') or '')[:64],
+                'server': (item.get('server') or '')[:64],
+                'ports_json': item.get('ports') or [],
+                'process_hints_json': item.get('process_hints') or {},
+                'metadata_json': redact_payload(item.get('metadata') or {}),
+                'last_seen': ts,
+            }
+            app, _ = DetectedApp.objects.update_or_create(
+                organization=agent.organization,
+                agent=agent,
+                name=(item.get('name') or 'unknown')[:120],
+                pid=item.get('pid') or None,
+                defaults=defaults,
+            )
+            app.app_health_score = calculate_app_health(app)
+            app.save(update_fields=['app_health_score'])
+
+        health, reasons = calculate_agent_health(agent)
+        agent.health_score = health
+        meta = agent.cloud_metadata_json or {}
+        meta['health_reasons'] = reasons
+        agent.cloud_metadata_json = meta
+        agent.save(update_fields=['health_score', 'cloud_metadata_json'])
+        return Response({'ok': True, 'health_score': health, 'apps': len(serializer.validated_data.get('apps') or [])})
