@@ -1,6 +1,6 @@
 {% load static %}
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,31 +18,24 @@
         <main class="container-fluid content-wrap">
             {% if messages %}
                 {% for message in messages %}
-                    <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
+                    <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show card-night" role="alert">
                         {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
                     </div>
                 {% endfor %}
             {% endif %}
             {% block content %}{% endblock %}
         </main>
-        <footer class="app-footer">© {% now "Y" %} Buho Observabilidad · Dashboard local</footer>
+        <footer class="app-footer">© {% now "Y" %} Buho Observabilidad · Nocturnal Intelligence Console</footer>
     </div>
 </div>
 {% include 'ui/components/toast.html' %}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function() {
-    const root = document.documentElement;
-    root.setAttribute('data-theme', localStorage.getItem('buho-theme') || 'light');
-    window.toggleTheme = function() {
-        const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        root.setAttribute('data-theme', next);
-        localStorage.setItem('buho-theme', next);
-    };
     window.copyText = function(text) {
         navigator.clipboard.writeText(text);
-        showToast('Copiado al portapapeles');
+        showToast('Copied to clipboard');
     };
     window.copyFrom = function(id) {
         const el = document.getElementById(id);

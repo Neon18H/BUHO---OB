@@ -1,16 +1,15 @@
-<nav class="topbar border-bottom">
+<nav class="topbar border-bottom px-3 py-2 d-flex justify-content-between align-items-center">
     <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('appSidebar').classList.toggle('collapsed')"><i class="bi bi-list"></i></button>
+        <button class="btn btn-sm btn-outline-info" onclick="document.getElementById('appSidebar').classList.toggle('collapsed')"><i class="bi bi-list"></i></button>
         <div class="input-group input-group-sm search-box">
-            <span class="input-group-text bg-body"><i class="bi bi-search"></i></span>
-            <input type="text" class="form-control" placeholder="Buscar servidores, agentes, logs..." disabled>
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control input-night" placeholder="Trace hosts, agents, incidents..." disabled>
         </div>
     </div>
     <div class="d-flex align-items-center gap-2">
-        {% if active_org %}<span class="badge text-bg-secondary">{{ active_org.name }}</span>{% endif %}
-        <button class="btn btn-sm btn-outline-secondary" onclick="toggleTheme()"><i class="bi bi-moon-stars"></i></button>
-        <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-bell"></i></button>
-        <span class="badge text-bg-primary-subtle text-primary-emphasis">{{ request.user.get_role_display }}</span>
+        {% if active_org %}<span class="badge" style="background:#2a2f46;color:#c9d8ff;">{{ active_org.name }}</span>{% endif %}
+        <button class="btn btn-sm btn-outline-info"><i class="bi bi-bell"></i></button>
+        <span class="badge" style="background:#1f3250;color:#9fe8ff;">{{ request.user.get_role_display }}</span>
         <div class="user-pill"><i class="bi bi-person-circle"></i><span>{{ request.user.username }}</span></div>
         <a class="btn btn-sm btn-outline-danger" href="{% url 'accounts:logout' %}">Logout</a>
     </div>
