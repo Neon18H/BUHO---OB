@@ -27,7 +27,7 @@
     <div class="card auth-card">
       <div class="card-body p-4">
         <h2 class="h4 mb-3">Registro inicial</h2>
-        <form method="post">
+        <form method="POST">
           {% csrf_token %}
           <label class="form-label">Organización</label>
           <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-building"></i></span>{{ form.organization_name }}</div>

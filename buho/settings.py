@@ -32,6 +32,11 @@ if not allowed_hosts:
 ALLOWED_HOSTS = allowed_hosts
 
 CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+if not DEBUG:
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
 
 BUHO_PUBLIC_URL = os.getenv('BUHO_PUBLIC_URL', '').strip().rstrip('/')
 
