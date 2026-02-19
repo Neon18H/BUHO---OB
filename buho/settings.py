@@ -1,10 +1,41 @@
+import importlib.util
+import logging
+import os
 from pathlib import Path
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-buho-local-dev-secret-key'
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 't', 'yes', 'y', 'on'}
+
+
+def env_list(name: str):
+    raw = os.getenv(name, '')
+    return [item.strip() for item in raw.split(',') if item.strip()]
+
+
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-buho-local-dev-secret-key')
+DEBUG = env_bool('DEBUG', default=False)
+
+allowed_hosts = env_list('ALLOWED_HOSTS')
+if not allowed_hosts:
+    if DEBUG:
+        allowed_hosts = ['*']
+    else:
+        railway_host = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL', '').replace('https://', '').replace('http://', '').strip('/')
+        allowed_hosts = [railway_host] if railway_host else ['localhost', '127.0.0.1', 'testserver']
+ALLOWED_HOSTS = allowed_hosts
+
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+
+BUHO_PUBLIC_URL = os.getenv('BUHO_PUBLIC_URL', '').strip().rstrip('/')
+
+HAS_WHITENOISE = importlib.util.find_spec('whitenoise') is not None
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -31,6 +62,8 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+if HAS_WHITENOISE:
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 ROOT_URLCONF = 'buho.urls'
 
@@ -52,12 +85,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'buho.wsgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+database_url = os.getenv('DATABASE_URL', '').strip()
+if database_url:
+    import dj_database_url
+
+    DATABASES = {
+        'default': dj_database_url.config(default=database_url, conn_max_age=60, ssl_require=True),
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -71,8 +112,11 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+if HAS_WHITENOISE:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'accounts.User'
@@ -89,3 +133,5 @@ ROLE_HIERARCHY = {
 
 RETENTION_DAYS = 7
 AGENT_OFFLINE_SECONDS = 90
+
+logging.getLogger(__name__).debug('Buho settings loaded (debug=%s, allowed_hosts=%s)', DEBUG, ALLOWED_HOSTS)

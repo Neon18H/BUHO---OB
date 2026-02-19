@@ -10,11 +10,13 @@ from .views import (
     AgentLogsIngestApiView,
     AgentMetricsIngestApiView,
     AgentProcessesIngestApiView,
+    HealthApiView,
     SecurityArtifactsIngestApiView,
     SecurityFindingsIngestApiView,
 )
 
 urlpatterns = [
+    path('health', HealthApiView.as_view(), name='api_health'),
     path('agents/enroll', AgentEnrollApiView.as_view(), name='api_agents_enroll'),
     path('agents/heartbeat', AgentHeartbeatApiView.as_view(), name='api_agents_heartbeat'),
     path('agent/commands/poll', AgentCommandPollApiView.as_view(), name='api_agent_commands_poll'),
