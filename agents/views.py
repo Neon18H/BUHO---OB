@@ -50,7 +50,7 @@ def build_agent_py():
             p = Path(path)
             if not p.exists():
                 return {}
-            return json.loads(p.read_text(encoding="utf-8"))
+            return json.loads(p.read_text(encoding="utf-8-sig"))
 
         def save_config(path, cfg):
             p = Path(path)
@@ -244,11 +244,20 @@ def build_windows_installer(server_url: str, token: str):
             processes_interval = 15
             log_file = $LogPath
         }}
-        $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
+        $cfgJson = ($config | ConvertTo-Json -Depth 6)
+        [System.IO.File]::WriteAllText($ConfigPath, $cfgJson, (New-Object System.Text.UTF8Encoding($false)))
 
         Write-Step "Creando entorno virtual"
         python -m venv (Join-Path $InstallRoot "venv")
         $PyExe = Join-Path $InstallRoot "venv\\Scripts\\python.exe"
+
+        Write-Step "Validando config.json"
+        & $PyExe -c "import json; import pathlib; p=pathlib.Path(r'$ConfigPath'); json.loads(p.read_text(encoding='utf-8-sig')); print('config json OK')"
+        if ($LASTEXITCODE -ne 0) {{
+            Write-ErrorStep "config.json inválido. Abortando instalación."
+            exit 1
+        }}
+
         & $PyExe -m pip install --disable-pip-version-check -r $ReqPath
 
         Write-Step "Validando sintaxis de agent.py"
