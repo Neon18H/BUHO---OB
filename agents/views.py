@@ -560,50 +560,39 @@ def build_windows_installer(server_url: str, token: str):
         $PyExeQuoted = '"' + $PyExe + '"'
         $AgentPyPathQuoted = '"' + $AgentPyPath + '"'
         $ConfigPathQuoted = '"' + $ConfigPath + '"'
+        $LogPathQuoted = '"' + $LogPath + '"'
         $RunnerScript = @"
 @echo off
 :loop
-$PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted
+$PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted >> $LogPathQuoted 2>&1
 timeout /t 5 /nobreak >nul
 goto loop
 "@
         [System.IO.File]::WriteAllText($RunnerCmdPath, $RunnerScript, (New-Object System.Text.UTF8Encoding($false)))
         $TaskCommand = '"' + $RunnerCmdPath + '"'
-        $IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-        if ($IsAdmin) {{
-            $createArgs = @('/Create', '/TN', 'BuhoAgent', '/SC', 'ONSTART', '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F', '/TR', $TaskCommand)
-            Write-Step "Creando tarea programada BuhoAgent (SYSTEM/ONSTART)"
-        }} else {{
-            $createArgs = @('/Create', '/TN', 'BuhoAgent', '/SC', 'ONLOGON', '/RU', $env:USERNAME, '/F', '/TR', $TaskCommand)
-            Write-Step "Creando tarea programada BuhoAgent (ONLOGON/$env:USERNAME)"
-        }}
+        $createArgs = @('/Create', '/TN', 'BuhoAgent', '/SC', 'ONSTART', '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F', '/TR', $TaskCommand)
+        Write-Step "Creando tarea programada BuhoAgent (SYSTEM/ONSTART)"
 
         & schtasks.exe @createArgs
         if ($LASTEXITCODE -ne 0) {{
             Write-ErrorStep "No se pudo crear la tarea programada BuhoAgent."
             Write-Host "Ejecuta manualmente:" -ForegroundColor Yellow
-            Write-Host "schtasks /Create /TN \"BuhoAgent\" /SC ONSTART /RU \"SYSTEM\" /RL HIGHEST /F /TR \"$TaskCommand\"" -ForegroundColor Yellow
-            Write-Host "o (sin admin):" -ForegroundColor Yellow
-            Write-Host "schtasks /Create /TN \"BuhoAgent\" /SC ONLOGON /RU \"$env:USERNAME\" /F /TR \"$TaskCommand\"" -ForegroundColor Yellow
+            Write-Host 'schtasks /Create /TN "BuhoAgent" /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F /TR "' + $TaskCommand + '"' -ForegroundColor Yellow
             Write-Host "Y luego ejecuta manualmente: $PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted" -ForegroundColor Yellow
             exit 1
         }}
 
-        if ($IsAdmin) {{
-            & schtasks.exe /Run /TN "BuhoAgent"
-            if ($LASTEXITCODE -ne 0) {{
-                Write-ErrorStep "No se pudo ejecutar la tarea BuhoAgent."
-                Write-Host "Ejecuta manualmente: schtasks /Run /TN \"BuhoAgent\"" -ForegroundColor Yellow
-                Write-Host "o directamente: $PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted" -ForegroundColor Yellow
-                exit 1
-            }}
-        }} else {{
-            Write-Host "[BuhoAgent] Aviso: iniciará al iniciar sesión." -ForegroundColor Yellow
+        & schtasks.exe /Run /TN "BuhoAgent"
+        if ($LASTEXITCODE -ne 0) {{
+            Write-ErrorStep "No se pudo ejecutar la tarea BuhoAgent."
+            Write-Host 'Ejecuta manualmente: schtasks /Run /TN "BuhoAgent"' -ForegroundColor Yellow
+            Write-Host "o directamente: $PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted" -ForegroundColor Yellow
+            exit 1
         }}
 
         Write-Host "[BuhoAgent] Instalación completa ✅" -ForegroundColor Green
         Write-Host "[BuhoAgent] Logs: C:\\ProgramData\\BuhoAgent\\buho-agent.log" -ForegroundColor Green
+        Write-Host '[BuhoAgent] Tail de logs: Get-Content "C:\\ProgramData\\BuhoAgent\\buho-agent.log" -Tail 200 -Wait' -ForegroundColor Green
         Write-Host "[BuhoAgent] Verifica ONLINE en: $BuhoUrl/agents/overview" -ForegroundColor Green
         """
     ).replace("\n        ", "\n").lstrip().rstrip() + "\n"
