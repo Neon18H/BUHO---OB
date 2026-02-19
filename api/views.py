@@ -1,5 +1,6 @@
 import secrets
 
+from django.db import connection
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -12,6 +13,7 @@ from agents.models import Agent, AgentCommand, AgentEnrollmentToken, AgentHeartb
 from agents.security import redact_payload, redact_text
 from agents.threats import ingest_artifacts, ingest_findings
 from audit.models import AuditLog
+from buho.runtime import get_db_label, get_public_base_url
 
 from .serializers import (
     AgentCommandAckSerializer,
@@ -90,7 +92,18 @@ class AgentEnrollApiView(APIView):
             metadata={'hostname': agent.hostname},
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
         )
-        return Response({'agent_id': agent.id, 'agent_key': raw_key, 'server_url': request.build_absolute_uri('/').rstrip('/')})
+        return Response({'agent_id': agent.id, 'agent_key': raw_key, 'server_url': get_public_base_url(request)})
+
+
+class HealthApiView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+        return Response({'ok': True, 'db': get_db_label()})
 
 
 class AgentHeartbeatApiView(APIView, AgentAuthMixin):

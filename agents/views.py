@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.views import View
 
 from audit.utils import create_audit_log
+from buho.runtime import get_public_base_url
 from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
@@ -771,7 +772,7 @@ class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
     def get(self, request):
         latest_token = self.scoped_tokens(request).first()
-        server_url = request.build_absolute_uri('/').rstrip('/')
+        server_url = get_public_base_url(request)
         loopback_hosts = {'127.0.0.1', 'localhost'}
         show_remote_hint = request.get_host().split(':')[0].lower() in loopback_hosts
         return render(
@@ -863,7 +864,7 @@ class AgentDownloadLinuxView(View):
         token = request.GET.get('token', '')
         if not token:
             return HttpResponseBadRequest('token required')
-        server_url = request.build_absolute_uri('/').rstrip('/')
+        server_url = get_public_base_url(request)
         script = dedent(
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -910,7 +911,7 @@ class AgentDownloadWindowsView(View):
         token = request.GET.get('token', '')
         if not token:
             return HttpResponseBadRequest('token required')
-        server_url = request.build_absolute_uri('/').rstrip('/')
+        server_url = get_public_base_url(request)
         response = HttpResponse(build_windows_installer(server_url, token), content_type='text/plain')
         response['Content-Disposition'] = 'attachment; filename="buho-agent-windows.ps1"'
         return response
