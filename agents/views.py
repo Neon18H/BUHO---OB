@@ -330,7 +330,8 @@ def build_agent_py():
             with p.open("r", encoding="utf-8", errors="ignore") as handle:
                 handle.seek(offset)
                 for line in handle.readlines()[-5000:]:
-                    match = re.search(r'"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^\s]+)[^"]*"\s+(\d{3})', line)
+                    pattern = r'"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\s+([^\\s]+)[^"]*"\\s+(\\d{3})'
+                    match = re.search(pattern, line)
                     if not match:
                         continue
                     method, endpoint, status_code = match.groups()
