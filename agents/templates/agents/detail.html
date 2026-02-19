@@ -11,10 +11,39 @@
     </div>
   </div>
   <div class="d-flex gap-2 align-items-center">
+    <a class="btn btn-outline-info" href="{% url 'agents:agent_threats' agent.id %}">Threats</a>
+    <form method="post" class="d-inline">{% csrf_token %}<input type="hidden" name="action" value="stop_nocturnal"><button class="btn btn-outline-danger btn-sm">Detener</button></form>
+    <button class="btn btn-sm" style="background:linear-gradient(90deg,#7c3aed,#06b6d4);color:white;box-shadow:0 0 16px rgba(6,182,212,.6)" data-bs-toggle="collapse" data-bs-target="#nocturnalConfig">🦉 Acción Nocturna</button>
     <span class="badge text-bg-secondary">Health {{ agent.health_score }}/100</span>
     <span class="badge text-bg-dark">{{ agent.status }}</span>
   </div>
 </div>
+
+<div class="collapse mb-3" id="nocturnalConfig">
+  <div class="card p-3">
+    <form method="post" class="row g-2">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="start_nocturnal">
+      <div class="col-12"><label class="form-label">Paths (one per line)</label><textarea name="paths" class="form-control" rows="3">/tmp
+/var/tmp</textarea></div>
+      <div class="col-md-2"><label class="form-label">Max files</label><input type="number" class="form-control" name="max_files_per_cycle" value="200"></div>
+      <div class="col-md-2"><label class="form-label">Interval (s)</label><input type="number" class="form-control" name="interval_seconds" value="60"></div>
+      <div class="col-md-2"><label class="form-label">Max MB</label><input type="number" class="form-control" name="max_file_size_mb" value="20"></div>
+      <div class="col-md-2"><label class="form-label">VT threshold</label><input type="number" class="form-control" name="vt_threshold" value="3"></div>
+      <div class="col-md-2 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" name="yara_enabled" checked><label class="form-check-label">YARA</label></div></div>
+      <div class="col-md-2 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" name="virustotal_enabled" {% if not vt_available %}disabled{% else %}checked{% endif %}><label class="form-check-label">VirusTotal {% if not vt_available %}(No disponible){% endif %}</label></div></div>
+      <div class="col-12"><button class="btn btn-primary">Iniciar escaneo</button></div>
+    </form>
+  </div>
+</div>
+
+{% if latest_nocturnal_run %}
+<div class="card p-3 mb-3">
+  <h6>Nocturnal Scan Run</h6>
+  <div class="small text-body-secondary">Estado: {{ latest_nocturnal_run.status }} · Progreso: {{ latest_nocturnal_run.last_progress }}% · Mensaje: {{ latest_nocturnal_run.last_message|default:'-' }}</div>
+  <div class="small text-body-secondary">Iniciado: {{ latest_nocturnal_run.started_at|date:'Y-m-d H:i:s' }} · Finalizado: {{ latest_nocturnal_run.ended_at|date:'Y-m-d H:i:s'|default:'-' }}</div>
+</div>
+{% endif %}
 
 <ul class="nav nav-tabs mb-3" id="agentDetailTabs" role="tablist">
   <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#metrics">Metrics</button></li>

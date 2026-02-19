@@ -1,4 +1,5 @@
 import secrets
+import uuid
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
@@ -221,3 +222,102 @@ class AppServiceMap(models.Model):
 
     class Meta:
         ordering = ('service_name',)
+
+
+class AgentCommand(models.Model):
+    class CommandType(models.TextChoices):
+        START_NOCTURNAL_SCAN = 'START_NOCTURNAL_SCAN', 'Start nocturnal scan'
+        STOP_NOCTURNAL_SCAN = 'STOP_NOCTURNAL_SCAN', 'Stop nocturnal scan'
+        SET_NOCTURNAL_CONFIG = 'SET_NOCTURNAL_CONFIG', 'Set nocturnal config'
+
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        SENT = 'SENT', 'Sent'
+        ACKED = 'ACKED', 'Acked'
+        RUNNING = 'RUNNING', 'Running'
+        COMPLETED = 'COMPLETED', 'Completed'
+        FAILED = 'FAILED', 'Failed'
+        CANCELED = 'CANCELED', 'Canceled'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='agent_commands')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='commands')
+    command_type = models.CharField(max_length=64, choices=CommandType.choices)
+    payload_json = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    issued_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+        indexes = [models.Index(fields=['organization', 'agent', 'status', 'created_at'])]
+
+
+class NocturnalScanRun(models.Model):
+    class Status(models.TextChoices):
+        RUNNING = 'RUNNING', 'Running'
+        COMPLETED = 'COMPLETED', 'Completed'
+        FAILED = 'FAILED', 'Failed'
+        STOPPED = 'STOPPED', 'Stopped'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='nocturnal_runs')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='nocturnal_runs')
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RUNNING)
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    stats_json = models.JSONField(default=dict, blank=True)
+    last_progress = models.PositiveSmallIntegerField(default=0)
+    last_message = models.CharField(max_length=255, blank=True)
+    config_snapshot_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-started_at',)
+        indexes = [models.Index(fields=['organization', 'agent', 'status', 'started_at'])]
+
+
+class SecurityFinding(models.Model):
+    class Severity(models.TextChoices):
+        LOW = 'LOW', 'Low'
+        MED = 'MED', 'Medium'
+        HIGH = 'HIGH', 'High'
+        CRITICAL = 'CRITICAL', 'Critical'
+
+    class Category(models.TextChoices):
+        YARA_MATCH = 'YARA_MATCH', 'YARA match'
+        VT_HASH_MATCH = 'VT_HASH_MATCH', 'VirusTotal hash match'
+        SUSPICIOUS_FILE = 'SUSPICIOUS_FILE', 'Suspicious file'
+
+    class Status(models.TextChoices):
+        OPEN = 'OPEN', 'Open'
+        ACK = 'ACK', 'Ack'
+        RESOLVED = 'RESOLVED', 'Resolved'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='security_findings')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='security_findings')
+    fingerprint = models.CharField(max_length=64)
+    severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MED)
+    category = models.CharField(max_length=32, choices=Category.choices)
+    title = models.CharField(max_length=255)
+    details_json = models.JSONField(default=dict, blank=True)
+    evidence_json = models.JSONField(default=dict, blank=True)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+
+    class Meta:
+        ordering = ('-last_seen',)
+        unique_together = ('organization', 'agent', 'fingerprint')
+        indexes = [models.Index(fields=['organization', 'agent', 'severity', 'status', 'last_seen'])]
+
+
+class HashReputationCache(models.Model):
+    sha256 = models.CharField(max_length=64, unique=True)
+    vt_json = models.JSONField(default=dict, blank=True)
+    last_checked = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ('-last_checked',)
