@@ -23,6 +23,7 @@ class AgentDownloadScriptTests(TestCase):
         self.assertIn('def get_disk_target():', script)
         self.assertIn('return os.path.join(system_drive, "\\\\")', script)
         self.assertIn('disk_target = get_disk_target()', script)
+        self.assertIn('return json.loads(p.read_text(encoding="utf-8-sig"))', script)
         self.assertNotIn('disk_target = "C:\\" if os.name == "nt" else "/"', script)
 
     def test_generated_agent_py_compiles(self):
@@ -40,10 +41,15 @@ class AgentDownloadScriptTests(TestCase):
         self.assertIn('Write-ErrorStep "agent.py tiene error de sintaxis"', script)
         self.assertIn('Write-ErrorStep "Enroll falló. No se creó tarea programada."', script)
         self.assertIn('[BuhoAgent] Instalación completa ✅', script)
+        self.assertIn('[System.IO.File]::WriteAllText($ConfigPath, $cfgJson, (New-Object System.Text.UTF8Encoding($false)))', script)
+        config_validate_cmd = "& $PyExe -c \"import json; import pathlib; p=pathlib.Path(r'$ConfigPath'); json.loads(p.read_text(encoding='utf-8-sig')); print('config json OK')\""
+        self.assertIn(config_validate_cmd, script)
 
         compile_idx = script.index('& $PyExe -m py_compile $AgentPyPath')
         enroll_idx = script.index('& $PyExe $AgentPyPath --enroll --config $ConfigPath')
+        validate_idx = script.index(config_validate_cmd)
         task_idx = script.index('Register-ScheduledTask -TaskName "BuhoAgent"')
+        self.assertLess(validate_idx, enroll_idx)
         self.assertLess(compile_idx, task_idx)
         self.assertLess(enroll_idx, task_idx)
 
