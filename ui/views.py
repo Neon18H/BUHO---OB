@@ -43,7 +43,7 @@ def _sync_agent_status_for_org(org):
 
 
 class BuhoLoginView(LoginView):
-    template_name = 'registration/login.html'
+    template_name = 'auth/login.html'
 
     def form_valid(self, form):
         response = super().form_valid(form)
@@ -61,7 +61,7 @@ class BuhoLogoutView(LogoutView):
 
 
 class RegisterView(View):
-    template_name = 'registration/register.html'
+    template_name = 'auth/register.html'
 
     def dispatch(self, request, *args, **kwargs):
         if Organization.objects.exists():
