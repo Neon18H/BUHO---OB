@@ -46,3 +46,19 @@ class DiscoverySerializer(serializers.Serializer):
     cloud_metadata = serializers.JSONField(required=False)
     hints = serializers.JSONField(required=False)
     apps = serializers.ListField(child=serializers.DictField(), required=False)
+
+
+class AgentCommandAckSerializer(serializers.Serializer):
+    command_id = serializers.UUIDField()
+    status = serializers.ChoiceField(choices=['ACKED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELED'])
+    progress = serializers.IntegerField(required=False, min_value=0, max_value=100)
+    message = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    stats = serializers.JSONField(required=False)
+
+
+class SecurityFindingsSerializer(serializers.Serializer):
+    findings = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+
+
+class SecurityArtifactsSerializer(serializers.Serializer):
+    artifacts = serializers.ListField(child=serializers.DictField(), allow_empty=False)

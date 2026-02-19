@@ -6,8 +6,10 @@ from .views import (
     AgentDownloadLinuxView,
     AgentDownloadRequirementsView,
     AgentDownloadWindowsView,
+    AgentThreatsView,
     AgentsInstallView,
     AgentsOverviewView,
+    ThreatsOverviewView,
     TokenCreateView,
     TokenRevokeView,
     TokensView,
@@ -25,5 +27,7 @@ urlpatterns = [
     path('download/agent.py', AgentDownloadAgentPyView.as_view(), name='download_agent_py'),
     path('download/requirements.txt', AgentDownloadRequirementsView.as_view(), name='download_requirements'),
     path('download/windows.ps1', AgentDownloadWindowsView.as_view(), name='download_windows'),
+    path('threats/overview/', ThreatsOverviewView.as_view(), name='threats_overview'),
+    path('<int:agent_id>/threats/', AgentThreatsView.as_view(), name='agent_threats'),
     path('<int:agent_id>/', AgentDetailView.as_view(), name='detail'),
 ]

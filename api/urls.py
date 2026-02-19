@@ -2,20 +2,28 @@ from django.urls import path
 
 from .views import (
     AgentAppsIngestApiView,
+    AgentCommandAckApiView,
+    AgentCommandPollApiView,
     AgentDiscoveryIngestApiView,
     AgentEnrollApiView,
     AgentHeartbeatApiView,
     AgentLogsIngestApiView,
     AgentMetricsIngestApiView,
     AgentProcessesIngestApiView,
+    SecurityArtifactsIngestApiView,
+    SecurityFindingsIngestApiView,
 )
 
 urlpatterns = [
     path('agents/enroll', AgentEnrollApiView.as_view(), name='api_agents_enroll'),
     path('agents/heartbeat', AgentHeartbeatApiView.as_view(), name='api_agents_heartbeat'),
+    path('agent/commands/poll', AgentCommandPollApiView.as_view(), name='api_agent_commands_poll'),
+    path('agent/commands/ack', AgentCommandAckApiView.as_view(), name='api_agent_commands_ack'),
     path('ingest/metrics', AgentMetricsIngestApiView.as_view(), name='api_ingest_metrics'),
     path('ingest/processes', AgentProcessesIngestApiView.as_view(), name='api_ingest_processes'),
     path('ingest/logs', AgentLogsIngestApiView.as_view(), name='api_ingest_logs'),
     path('ingest/apps', AgentAppsIngestApiView.as_view(), name='api_ingest_apps'),
     path('ingest/discovery', AgentDiscoveryIngestApiView.as_view(), name='api_ingest_discovery'),
+    path('ingest/security/findings', SecurityFindingsIngestApiView.as_view(), name='api_ingest_security_findings'),
+    path('ingest/security/artifacts', SecurityArtifactsIngestApiView.as_view(), name='api_ingest_security_artifacts'),
 ]

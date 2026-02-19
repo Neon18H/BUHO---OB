@@ -8,11 +8,23 @@ from rest_framework.views import APIView
 
 from agents.incidents import evaluate_http_incidents, evaluate_log_incidents, evaluate_metric_incidents
 from agents.health import calculate_agent_health, calculate_app_health
-from agents.models import Agent, AgentEnrollmentToken, AgentHeartbeat, DetectedApp, LogEntry, MetricPoint, ProcessSample
+from agents.models import Agent, AgentCommand, AgentEnrollmentToken, AgentHeartbeat, DetectedApp, LogEntry, MetricPoint, NocturnalScanRun, ProcessSample
 from agents.security import redact_payload, redact_text
+from agents.threats import ingest_artifacts, ingest_findings
 from audit.models import AuditLog
 
-from .serializers import AppsSerializer, DiscoverySerializer, EnrollSerializer, HeartbeatSerializer, LogsSerializer, MetricsSerializer, ProcessesSerializer
+from .serializers import (
+    AgentCommandAckSerializer,
+    AppsSerializer,
+    DiscoverySerializer,
+    EnrollSerializer,
+    HeartbeatSerializer,
+    LogsSerializer,
+    MetricsSerializer,
+    ProcessesSerializer,
+    SecurityArtifactsSerializer,
+    SecurityFindingsSerializer,
+)
 
 
 class AgentAuthMixin:
@@ -280,3 +292,112 @@ class AgentDiscoveryIngestApiView(APIView, AgentAuthMixin):
         agent.cloud_metadata_json = meta
         agent.save(update_fields=['health_score', 'cloud_metadata_json'])
         return Response({'ok': True, 'health_score': health, 'apps': len(serializer.validated_data.get('apps') or [])})
+
+
+class AgentCommandPollApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        agent = self.get_agent_from_headers(request)
+        if not agent:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+        command = AgentCommand.objects.filter(
+            organization=agent.organization,
+            agent=agent,
+            status=AgentCommand.Status.PENDING,
+        ).order_by('created_at').first()
+        if not command:
+            return Response({'command': None})
+        command.status = AgentCommand.Status.SENT
+        command.save(update_fields=['status', 'updated_at'])
+        return Response(
+            {
+                'command': {
+                    'id': str(command.id),
+                    'type': command.command_type,
+                    'payload': command.payload_json,
+                    'created_at': command.created_at,
+                }
+            }
+        )
+
+
+class AgentCommandAckApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        agent = self.get_agent_from_headers(request)
+        if not agent:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+        serializer = AgentCommandAckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        command = AgentCommand.objects.filter(id=data['command_id'], agent=agent, organization=agent.organization).first()
+        if not command:
+            return Response({'detail': 'Command not found'}, status=status.HTTP_404_NOT_FOUND)
+        command.status = data['status']
+        command.save(update_fields=['status', 'updated_at'])
+
+        run = NocturnalScanRun.objects.filter(organization=agent.organization, agent=agent, ended_at__isnull=True).order_by('-started_at').first()
+        if data['status'] == AgentCommand.Status.RUNNING and not run:
+            run = NocturnalScanRun.objects.create(
+                organization=agent.organization,
+                agent=agent,
+                status=NocturnalScanRun.Status.RUNNING,
+                config_snapshot_json=command.payload_json,
+            )
+        if run:
+            run.last_progress = data.get('progress', run.last_progress)
+            run.last_message = data.get('message', run.last_message)
+            if data.get('stats'):
+                run.stats_json = data['stats']
+            if data['status'] in {AgentCommand.Status.COMPLETED, AgentCommand.Status.CANCELED}:
+                run.status = NocturnalScanRun.Status.STOPPED if data['status'] == AgentCommand.Status.CANCELED else NocturnalScanRun.Status.COMPLETED
+                run.ended_at = timezone.now()
+            elif data['status'] == AgentCommand.Status.FAILED:
+                run.status = NocturnalScanRun.Status.FAILED
+                run.ended_at = timezone.now()
+            elif data['status'] == AgentCommand.Status.RUNNING:
+                run.status = NocturnalScanRun.Status.RUNNING
+            run.save()
+        return Response({'ok': True})
+
+
+class SecurityFindingsIngestApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        agent = self.get_agent_from_headers(request)
+        if not agent:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+        serializer = SecurityFindingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        stored = ingest_findings(
+            organization=agent.organization,
+            agent=agent,
+            findings=serializer.validated_data['findings'],
+        )
+        return Response({'ingested': stored})
+
+
+class SecurityArtifactsIngestApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        agent = self.get_agent_from_headers(request)
+        if not agent:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+        serializer = SecurityArtifactsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        threshold = int((request.data or {}).get('vt_threshold') or 3)
+        checked, hits = ingest_artifacts(
+            organization=agent.organization,
+            agent=agent,
+            artifacts=serializer.validated_data['artifacts'],
+            threshold=threshold,
+        )
+        return Response({'checked': checked, 'vt_hits': hits})

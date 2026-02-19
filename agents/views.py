@@ -1,9 +1,10 @@
 import logging
+import os
 from textwrap import dedent
 from datetime import timedelta
 
 from django.contrib import messages
-from django.db.models import Max
+from django.db.models import Count, Max, Q
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -13,10 +14,10 @@ from audit.utils import create_audit_log
 from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
-from .models import Agent, AgentEnrollmentToken, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample
+from .models import Agent, AgentCommand, AgentEnrollmentToken, DetectedApp, Incident, LogEntry, MetricPoint, NocturnalScanRun, ProcessSample, SecurityFinding
 
 
-AGENT_REQUIREMENTS = "requests\npsutil\n"
+AGENT_REQUIREMENTS = "requests\npsutil\nyara-python\n"
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +26,7 @@ def build_agent_py():
         """
         #!/usr/bin/env python3
         import argparse
+        import hashlib
         import json
         import os
         import platform
@@ -39,7 +41,7 @@ def build_agent_py():
         import psutil
         import requests
 
-        VERSION = "0.4.0"
+        VERSION = "0.5.0"
         SECRET_PATTERNS = [r"(?i)(authorization:|bearer\\s+)[^\\s]+", r"(?i)(password|token|api[_-]?key)=([^&\\s]+)"]
 
         def utc_now():
@@ -123,6 +125,78 @@ def build_agent_py():
                 time.sleep(wait)
             enqueue_spool(cfg["spool_file"], {"path": path, "payload": payload})
             return False
+
+        def get_scan_state_path():
+            if os.name == "nt":
+                return "C:/ProgramData/BuhoAgent/scan_state.json"
+            return "/var/lib/buhoagent/scan_state.json"
+
+        def sha256_file(path):
+            h = hashlib.sha256()
+            with open(path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+
+        def poll_command(cfg, headers):
+            try:
+                response = requests.get(cfg["server_url"] + "/api/agent/commands/poll", headers=headers, timeout=(3, 5))
+                if response.status_code >= 300:
+                    return None
+                return response.json().get("command")
+            except Exception:
+                return None
+
+        def ack_command(cfg, headers, command_id, status, progress=0, message="", stats=None):
+            payload = {"command_id": command_id, "status": status, "progress": progress, "message": message, "stats": stats or {}}
+            try:
+                post_json(cfg["server_url"] + "/api/agent/commands/ack", payload, headers=headers, timeout=(3, 5))
+            except Exception:
+                pass
+
+        def run_nocturnal_cycle(cfg, headers, state):
+            noct = cfg.get("nocturnal") or {}
+            paths = noct.get("paths") or (["C:/Windows/Temp"] if os.name == "nt" else ["/tmp", "/var/tmp"])
+            max_files = int(noct.get("max_files_per_cycle", 200))
+            max_size = int(noct.get("max_file_size_mb", 20)) * 1024 * 1024
+            scan_state = load_json(get_scan_state_path(), {"files": {}})
+            artifacts, findings = [], []
+            scanned = 0
+            for root in paths:
+                if scanned >= max_files:
+                    break
+                p = Path(root)
+                if not p.exists():
+                    continue
+                for fp in p.rglob("*"):
+                    if scanned >= max_files:
+                        break
+                    try:
+                        if not fp.is_file():
+                            continue
+                        stat = fp.stat()
+                        if stat.st_size > max_size:
+                            continue
+                        prev = (scan_state.get("files") or {}).get(str(fp))
+                        marker = f"{int(stat.st_mtime)}:{stat.st_size}"
+                        if prev == marker:
+                            continue
+                        sha = sha256_file(fp)
+                        artifacts.append({"path": redact(str(fp))[:255], "sha256": sha, "size": stat.st_size, "mtime": stat.st_mtime, "ts": utc_now()})
+                        scan_state.setdefault("files", {})[str(fp)] = marker
+                        scanned += 1
+                    except Exception:
+                        continue
+            if artifacts:
+                post_with_retry(cfg, headers, "/api/ingest/security/artifacts", {"artifacts": artifacts, "vt_threshold": int(noct.get("vt_threshold", 3))})
+            if findings:
+                post_with_retry(cfg, headers, "/api/ingest/security/findings", {"findings": findings})
+            save_json(get_scan_state_path(), scan_state)
+            state["nocturnal_stats"] = {
+                "files_scanned": scanned,
+                "hashes_checked": len(artifacts),
+                "yara_matches": len(findings),
+            }
 
         def collect_metrics():
             disk_target = get_disk_target()
@@ -324,6 +398,8 @@ def build_agent_py():
             cfg.setdefault("discovery_interval", 300)
             cfg.setdefault("logs_sources", [{"type": "file", "path": cfg.get("log_file", "C:/ProgramData/BuhoAgent/buho-agent.log"), "name": "agent"}])
             cfg.setdefault("http_logs", [])
+            cfg.setdefault("command_poll_interval", 12)
+            cfg.setdefault("nocturnal", {"active": False})
             headers = {"X-Buho-Agent-Id": str(cfg["agent_id"]), "X-Buho-Agent-Key": cfg["agent_key"]}
             state_path = str(Path(config_path).with_name("state.json"))
             state = load_json(state_path, {})
@@ -338,6 +414,18 @@ def build_agent_py():
                         minute_bucket = int(now // 60)
                         sent_logs_minute = 0
                     flush_spool(cfg, headers)
+                    if now - last["command_poll"] >= cfg["command_poll_interval"]:
+                        command = poll_command(cfg, headers)
+                        if command and command.get("id"):
+                            ctype = command.get("type")
+                            if ctype == "START_NOCTURNAL_SCAN":
+                                cfg["nocturnal"].update(command.get("payload") or {})
+                                cfg["nocturnal"]["active"] = True
+                                ack_command(cfg, headers, command["id"], "RUNNING", progress=1, message="Nocturnal scan running")
+                            elif ctype == "STOP_NOCTURNAL_SCAN":
+                                cfg["nocturnal"]["active"] = False
+                                ack_command(cfg, headers, command["id"], "CANCELED", progress=100, message="Nocturnal scan stopped", stats=state.get("nocturnal_stats") or {})
+                        last["command_poll"] = now
                     if now - last["heartbeat"] >= cfg["heartbeat_interval"]:
                         post_with_retry(cfg, headers, "/api/agents/heartbeat", {"status": "ONLINE", "metadata": {"agent_version": VERSION}})
                         last["heartbeat"] = now
@@ -365,6 +453,9 @@ def build_agent_py():
                             post_with_retry(cfg, headers, "/api/ingest/logs", {"logs": logs})
                             sent_logs_minute += len(logs)
                         last["logs"] = now
+                    if cfg.get("nocturnal", {}).get("active") and now - last["nocturnal"] >= int(cfg.get("nocturnal", {}).get("interval_seconds", 60)):
+                        run_nocturnal_cycle(cfg, headers, state)
+                        last["nocturnal"] = now
                     save_json(state_path, state)
                     if once:
                         return
@@ -572,6 +663,40 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
     require_organization = True
 
+    def post(self, request, agent_id):
+        agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
+        action = request.POST.get('action')
+        if action == 'start_nocturnal':
+            payload = {
+                'paths': [p.strip() for p in (request.POST.get('paths') or '').splitlines() if p.strip()],
+                'yara_enabled': request.POST.get('yara_enabled') == 'on',
+                'virustotal_enabled': request.POST.get('virustotal_enabled') == 'on',
+                'max_files_per_cycle': int(request.POST.get('max_files_per_cycle') or 200),
+                'interval_seconds': int(request.POST.get('interval_seconds') or 60),
+                'max_file_size_mb': int(request.POST.get('max_file_size_mb') or 20),
+                'vt_threshold': int(request.POST.get('vt_threshold') or 3),
+            }
+            AgentCommand.objects.create(
+                organization=agent.organization,
+                agent=agent,
+                command_type=AgentCommand.CommandType.START_NOCTURNAL_SCAN,
+                payload_json=payload,
+                status=AgentCommand.Status.PENDING,
+                issued_by=request.user,
+            )
+            messages.success(request, 'Acción Nocturna enviada al agente.')
+        elif action == 'stop_nocturnal':
+            AgentCommand.objects.create(
+                organization=agent.organization,
+                agent=agent,
+                command_type=AgentCommand.CommandType.STOP_NOCTURNAL_SCAN,
+                payload_json={},
+                status=AgentCommand.Status.PENDING,
+                issued_by=request.user,
+            )
+            messages.success(request, 'Comando de detención enviado.')
+        return redirect('agents:detail', agent_id=agent.id)
+
     def get(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
         create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='Agent', target_id=str(agent.id))
@@ -598,6 +723,8 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         processes = ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu', '-mem')[:50] if latest_process_ts else []
         last_metrics_at = MetricPoint.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
         last_logs_at = LogEntry.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
+        latest_run = NocturnalScanRun.objects.filter(agent=agent).order_by('-started_at').first()
+        vt_available = bool(os.environ.get('VT_API_KEY'))
         return render(request, 'agents/detail.html', {
             'agent': agent,
             'heartbeats': agent.heartbeats.all()[:20],
@@ -615,7 +742,37 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             'last_metrics_at': last_metrics_at,
             'last_processes_at': latest_process_ts,
             'last_logs_at': last_logs_at,
+            'latest_nocturnal_run': latest_run,
+            'vt_available': vt_available,
         })
+
+
+class ThreatsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+    require_organization = True
+
+    def get(self, request):
+        findings = SecurityFinding.objects.filter(organization=request.user.organization)
+        high_critical = findings.filter(severity__in=[SecurityFinding.Severity.HIGH, SecurityFinding.Severity.CRITICAL], status=SecurityFinding.Status.OPEN).count()
+        recent = findings.select_related('agent').order_by('-last_seen')[:50]
+        by_agent = findings.values('agent__name').annotate(total=Count('id')).order_by('-total')[:10]
+        return render(request, 'agents/threats_overview.html', {'high_critical': high_critical, 'recent_findings': recent, 'by_agent': by_agent})
+
+
+class AgentThreatsView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+    require_organization = True
+
+    def get(self, request, agent_id):
+        agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
+        severity = request.GET.get('severity', '')
+        status_filter = request.GET.get('status', '')
+        findings = SecurityFinding.objects.filter(agent=agent)
+        if severity:
+            findings = findings.filter(severity=severity)
+        if status_filter:
+            findings = findings.filter(status=status_filter)
+        return render(request, 'agents/agent_threats.html', {'agent': agent, 'findings': findings[:300], 'severity': severity, 'status_filter': status_filter})
 
 
 class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
