@@ -1,18 +1,29 @@
 {% extends 'ui/base.html' %}
 {% block content %}
-<h1 class="h3 mb-3">{{ agent.name }}</h1>
-<ul class="nav nav-tabs mb-3">
-  <li class="nav-item"><a class="nav-link active">Overview</a></li>
-  <li class="nav-item"><a class="nav-link">Heartbeat</a></li>
-  <li class="nav-item"><a class="nav-link">Config</a></li>
-  <li class="nav-item"><a class="nav-link">Metrics</a></li>
-  <li class="nav-item"><a class="nav-link">Logs</a></li>
-  <li class="nav-item"><a class="nav-link">Alerts</a></li>
-</ul>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">{{ agent.name }}</h1>
+    <div class="text-body-secondary">{{ agent.hostname }} · {{ agent.get_provider_display }} · {{ agent.get_environment_display }}</div>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <span class="badge text-bg-secondary">Health {{ agent.health_score }}/100</span>
+    <span class="badge text-bg-dark">{{ agent.status }}</span>
+  </div>
+</div>
+<ul class="nav nav-tabs mb-3"><li class="nav-item"><a class="nav-link active">Overview</a></li><li class="nav-item"><a class="nav-link">Metrics</a></li><li class="nav-item"><a class="nav-link">Apps</a></li><li class="nav-item"><a class="nav-link">Logs</a></li><li class="nav-item"><a class="nav-link">Alerts</a></li><li class="nav-item"><a class="nav-link">Processes</a></li></ul>
 <div class="row g-3">
-  <div class="col-lg-4"><div class="card p-3"><h6>Status</h6><p>{{ agent.get_status_display }}</p><h6>Last seen</h6><p>{{ agent.last_seen|date:'Y-m-d H:i:s' }}</p><h6>Version</h6><p>{{ agent.version }}</p></div></div>
-  <div class="col-lg-8"><div class="card p-3"><h6>Heartbeats recientes</h6><table class="table table-sm"><thead><tr><th>Timestamp</th><th>Status</th><th>Metadata</th></tr></thead><tbody>{% for hb in heartbeats %}<tr><td>{{ hb.ts|date:'Y-m-d H:i:s' }}</td><td>{{ hb.status }}</td><td><code>{{ hb.metadata_json }}</code></td></tr>{% empty %}<tr><td colspan="3">Sin heartbeats aún.</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="col-lg-4"><div class="card p-3 h-100"><h6>Overview</h6><p class="small mb-1">Provider: {{ agent.get_provider_display }}</p><p class="small mb-1">Environment: {{ agent.get_environment_display }}</p><p class="small mb-1">Tags: {{ agent.tags_json|join:', '|default:'-' }}</p><p class="small mb-1">Region: {{ agent.region|default:'-' }}</p><p class="small mb-0">Last seen: {{ agent.last_seen|date:'Y-m-d H:i:s' }}</p></div></div>
+  <div class="col-lg-8"><div class="card p-3"><h6>Metrics</h6><canvas id="agentMetricsChart" height="100"></canvas></div></div>
 </div>
 <div class="row g-3 mt-1">
-  <div class="col-12"><div class="card p-3"><h6>Apps detectadas</h6><table class="table table-sm"><thead><tr><th>Nombre</th><th>Tipo</th><th>PID</th><th>Puertos</th><th>Last seen</th></tr></thead><tbody>{% for app in apps %}<tr><td>{{ app.name }}</td><td>{{ app.kind }}</td><td>{{ app.pid|default:'-' }}</td><td><code>{{ app.ports_json }}</code></td><td>{{ app.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">Sin apps detectadas.</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="col-lg-6"><div class="card p-3"><h6>Apps</h6><table class="table table-sm"><thead><tr><th>Name</th><th>Runtime</th><th>Framework</th><th>Ports</th><th>Health</th></tr></thead><tbody>{% for app in apps %}<tr><td><a href="{% url 'ui:app_detail' app.id %}">{{ app.name }}</a></td><td>{{ app.runtime|default:'-' }}</td><td>{{ app.framework|default:'-' }}</td><td><code>{{ app.ports_json }}</code></td><td>{{ app.app_health_score }}</td></tr>{% empty %}<tr><td colspan="5">Sin apps detectadas.</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="col-lg-6"><div class="card p-3"><h6>Logs</h6><table class="table table-sm"><thead><tr><th>TS</th><th>Lvl</th><th>Source</th><th>Message</th></tr></thead><tbody>{% for log in logs|slice:':40' %}<tr><td>{{ log.ts|date:'H:i:s' }}</td><td>{{ log.level }}</td><td>{{ log.source }}</td><td>{{ log.message|truncatechars:80 }}</td></tr>{% empty %}<tr><td colspan="4">Sin logs.</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="col-lg-6"><div class="card p-3"><h6>Alerts / Incidents</h6><ul class="list-group list-group-flush">{% for incident in incidents|slice:':15' %}<li class="list-group-item d-flex justify-content-between"><span>{{ incident.type }}</span><span>{{ incident.status }}</span></li>{% empty %}<li class="list-group-item">Sin alertas</li>{% endfor %}</ul></div></div>
+  <div class="col-lg-6"><div class="card p-3"><h6>Processes / Ports</h6><table class="table table-sm"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>MEM</th></tr></thead><tbody>{% for row in processes %}<tr><td>{{ row.pid }}</td><td>{{ row.name }}</td><td>{{ row.cpu }}</td><td>{{ row.mem }}</td></tr>{% empty %}<tr><td colspan="4">Sin procesos recientes.</td></tr>{% endfor %}</tbody></table></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+new Chart(document.getElementById('agentMetricsChart'), {type:'line', data:{labels:{{ labels|safe }},datasets:[{label:'CPU %',data:{{ cpu_values|safe }},borderColor:'#4f46e5'},{label:'RAM %',data:{{ mem_values|safe }},borderColor:'#0ea5e9'},{label:'Disk %',data:{{ disk_values|safe }},borderColor:'#f59e0b'}]}});
+</script>
 {% endblock %}

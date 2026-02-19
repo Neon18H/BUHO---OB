@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AgentAppsIngestApiView,
+    AgentDiscoveryIngestApiView,
     AgentEnrollApiView,
     AgentHeartbeatApiView,
     AgentLogsIngestApiView,
@@ -16,4 +17,5 @@ urlpatterns = [
     path('ingest/processes', AgentProcessesIngestApiView.as_view(), name='api_ingest_processes'),
     path('ingest/logs', AgentLogsIngestApiView.as_view(), name='api_ingest_logs'),
     path('ingest/apps', AgentAppsIngestApiView.as_view(), name='api_ingest_apps'),
+    path('ingest/discovery', AgentDiscoveryIngestApiView.as_view(), name='api_ingest_discovery'),
 ]

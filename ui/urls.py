@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AlertsView,
+    AppDetailView,
     AppsListView,
     LogsExplorerView,
     OrganizationUpdateView,
@@ -23,6 +24,7 @@ urlpatterns = [
     path('servers/', ServersListView.as_view(), name='servers'),
     path('servers/<int:server_id>/', ServerDetailView.as_view(), name='server_detail'),
     path('apps/', AppsListView.as_view(), name='apps'),
+    path('apps/<int:app_id>/', AppDetailView.as_view(), name='app_detail'),
     path('logs/', LogsExplorerView.as_view(), name='logs'),
     path('alerts/', AlertsView.as_view(), name='alerts'),
     path('widgets/create/', WidgetCreateView.as_view(), name='widget_create'),
