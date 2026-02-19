@@ -62,10 +62,23 @@ class AgentDownloadScriptTests(TestCase):
         compile_idx = script.index('& $PyExe -m py_compile $AgentPyPath')
         enroll_idx = script.index('& $PyExe $AgentPyPath --enroll --config $ConfigPath')
         validate_idx = script.index(config_validate_cmd)
-        task_idx = script.index('Register-ScheduledTask -TaskName "BuhoAgent"')
+        task_idx = script.index('& schtasks.exe @createArgs')
         self.assertLess(validate_idx, enroll_idx)
         self.assertLess(compile_idx, task_idx)
         self.assertLess(enroll_idx, task_idx)
+
+    def test_windows_installer_uses_schtasks_for_admin_and_user_modes(self):
+        script = build_windows_installer('http://buho.example', 'tok123')
+
+        self.assertIn("'/SC', 'ONSTART'", script)
+        self.assertIn("'/RU', 'SYSTEM'", script)
+        self.assertIn("'/RL', 'HIGHEST'", script)
+        self.assertIn('& schtasks.exe /Run /TN "BuhoAgent"', script)
+        self.assertIn("'/SC', 'ONLOGON'", script)
+        self.assertIn("'/RU', $env:USERNAME", script)
+        self.assertIn('[BuhoAgent] Aviso: iniciará al iniciar sesión.', script)
+        self.assertIn('No se pudo crear la tarea programada BuhoAgent.', script)
+        self.assertIn('Y luego ejecuta manualmente:', script)
 
 
 class AgentInstallHintTests(TestCase):
