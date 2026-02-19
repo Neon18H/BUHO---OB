@@ -74,6 +74,8 @@ class AgentDownloadScriptTests(TestCase):
         self.assertIn("'/RU', 'SYSTEM'", script)
         self.assertIn("'/RL', 'HIGHEST'", script)
         self.assertIn('& schtasks.exe /Run /TN "BuhoAgent"', script)
+        self.assertIn('$RunnerCmdPath = Join-Path $InstallRoot "run-agent.cmd"', script)
+        self.assertIn('goto loop', script)
         self.assertIn("'/SC', 'ONLOGON'", script)
         self.assertIn("'/RU', $env:USERNAME", script)
         self.assertIn('[BuhoAgent] Aviso: iniciará al iniciar sesión.', script)

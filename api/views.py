@@ -125,11 +125,13 @@ class AgentMetricsIngestApiView(APIView, AgentAuthMixin):
             for item in serializer.validated_data['metrics']
         ]
         MetricPoint.objects.bulk_create(rows)
+        agent.last_seen = timezone.now()
+        agent.status = Agent.Status.ONLINE
         evaluate_metric_incidents(agent.organization, agent)
         evaluate_http_incidents(agent.organization, agent)
         health, _ = calculate_agent_health(agent)
         agent.health_score = health
-        agent.save(update_fields=['health_score'])
+        agent.save(update_fields=['last_seen', 'status', 'health_score'])
         return Response({'ingested': len(rows), 'health_score': health})
 
 
@@ -159,6 +161,9 @@ class AgentProcessesIngestApiView(APIView, AgentAuthMixin):
             for item in serializer.validated_data['processes']
         ]
         ProcessSample.objects.bulk_create(rows)
+        agent.last_seen = timezone.now()
+        agent.status = Agent.Status.ONLINE
+        agent.save(update_fields=['last_seen', 'status'])
         return Response({'ingested': len(rows)})
 
 
@@ -188,9 +193,11 @@ class AgentLogsIngestApiView(APIView, AgentAuthMixin):
                 )
             LogEntry.objects.bulk_create(rows)
         evaluate_log_incidents(agent.organization, agent)
+        agent.last_seen = timezone.now()
+        agent.status = Agent.Status.ONLINE
         health, _ = calculate_agent_health(agent)
         agent.health_score = health
-        agent.save(update_fields=['health_score'])
+        agent.save(update_fields=['last_seen', 'status', 'health_score'])
         return Response({'ingested': len(rows), 'health_score': health})
 
 

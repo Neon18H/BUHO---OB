@@ -3,6 +3,7 @@ from textwrap import dedent
 from datetime import timedelta
 
 from django.contrib import messages
+from django.db.models import Max
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -38,7 +39,7 @@ def build_agent_py():
         import psutil
         import requests
 
-        VERSION = "0.3.0"
+        VERSION = "0.4.0"
         SECRET_PATTERNS = [r"(?i)(authorization:|bearer\\s+)[^\\s]+", r"(?i)(password|token|api[_-]?key)=([^&\\s]+)"]
 
         def utc_now():
@@ -64,7 +65,15 @@ def build_agent_py():
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-        def post_json(url, payload, headers=None, timeout=5):
+        def write_log(log_file, level, message, exc=None):
+            Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as handle:
+                handle.write(f"{utc_now()} [{level}] {message}\\n")
+                if exc:
+                    import traceback
+                    handle.write(traceback.format_exc() + "\\n")
+
+        def post_json(url, payload, headers=None, timeout=(3, 5)):
             headers = headers or {}
             response = requests.post(url, json=payload, headers=headers, timeout=timeout)
             return response.status_code, response.json() if response.content else {}
@@ -105,11 +114,12 @@ def build_agent_py():
         def post_with_retry(cfg, headers, path, payload):
             for wait in [1, 2, 5, 10, 20, 30, 45, 60]:
                 try:
-                    status_code, _ = post_json(cfg["server_url"] + path, payload, headers=headers, timeout=5)
+                    status_code, data = post_json(cfg["server_url"] + path, payload, headers=headers, timeout=(3, 5))
                     if status_code < 300:
                         return True
-                except Exception:
-                    pass
+                    write_log(cfg.get("log_file", "C:/ProgramData/BuhoAgent/buho-agent.log"), "WARN", f"upload failed {path} status={status_code} body={data}")
+                except Exception as exc:
+                    write_log(cfg.get("log_file", "C:/ProgramData/BuhoAgent/buho-agent.log"), "ERROR", f"upload exception {path}: {exc}", exc=exc)
                 time.sleep(wait)
             enqueue_spool(cfg["spool_file"], {"path": path, "payload": payload})
             return False
@@ -305,12 +315,14 @@ def build_agent_py():
 
         def run_loop(config_path, once=False):
             cfg = enroll(config_path)
+            cfg.setdefault("log_file", "C:/ProgramData/BuhoAgent/buho-agent.log")
+            cfg.setdefault("spool_file", str(Path(config_path).with_name("spool.jsonl")))
             cfg.setdefault("heartbeat_interval", 15)
-            cfg.setdefault("metrics_interval", 15)
+            cfg.setdefault("metrics_interval", 10)
             cfg.setdefault("processes_interval", 30)
             cfg.setdefault("logs_interval", 15)
             cfg.setdefault("discovery_interval", 300)
-            cfg.setdefault("logs_sources", [{"type": "file", "path": cfg.get("log_file", "buho-agent.log"), "name": "agent"}])
+            cfg.setdefault("logs_sources", [{"type": "file", "path": cfg.get("log_file", "C:/ProgramData/BuhoAgent/buho-agent.log"), "name": "agent"}])
             cfg.setdefault("http_logs", [])
             headers = {"X-Buho-Agent-Id": str(cfg["agent_id"]), "X-Buho-Agent-Key": cfg["agent_key"]}
             state_path = str(Path(config_path).with_name("state.json"))
@@ -318,6 +330,7 @@ def build_agent_py():
             last = defaultdict(float)
             sent_logs_minute = 0
             minute_bucket = int(time.time() // 60)
+            write_log(cfg["log_file"], "INFO", "agent loop started")
             while True:
                 try:
                     now = time.time()
@@ -337,7 +350,7 @@ def build_agent_py():
                     if now - last["processes"] >= cfg["processes_interval"]:
                         processes, apps = collect_processes_and_apps()
                         services = [{"name": item.get("name"), "kind": "service", "ports": [], "metadata": {"status": item.get("status")}} for item in collect_services()]
-                        post_with_retry(cfg, headers, "/api/ingest/processes", {"ts": utc_now(), "processes": processes})
+                        post_with_retry(cfg, headers, "/api/ingest/processes", {"ts": utc_now(), "processes": processes[:25]})
                         post_with_retry(cfg, headers, "/api/ingest/apps", {"ts": utc_now(), "apps": apps + services})
                         last["processes"] = now
                     if now - last["discovery"] >= cfg["discovery_interval"]:
@@ -357,8 +370,7 @@ def build_agent_py():
                         return
                     time.sleep(1)
                 except Exception as exc:
-                    with open(cfg.get("log_file", "buho-agent.log"), "a", encoding="utf-8") as handle:
-                        handle.write(f"{utc_now()} loop-error {exc}\\n")
+                    write_log(cfg.get("log_file", "C:/ProgramData/BuhoAgent/buho-agent.log"), "ERROR", f"loop exception: {exc}", exc=exc)
                     if once:
                         raise
                     time.sleep(5)
@@ -379,7 +391,11 @@ def build_agent_py():
             parser.error("Use --enroll, --run or --once")
 
         if __name__ == "__main__":
-            main()
+            try:
+                main()
+            except Exception as exc:
+                write_log("C:/ProgramData/BuhoAgent/buho-agent.log", "ERROR", f"fatal crash: {exc}", exc=exc)
+                raise
         """
     ).replace("\n        ", "\n").lstrip().rstrip() + "\n"
 
@@ -395,6 +411,7 @@ def build_windows_installer(server_url: str, token: str):
         $LogPath = Join-Path $InstallRoot "buho-agent.log"
         $AgentPyPath = Join-Path $InstallRoot "agent.py"
         $ReqPath = Join-Path $InstallRoot "requirements.txt"
+        $RunnerCmdPath = Join-Path $InstallRoot "run-agent.cmd"
 
         function Write-Step($message) {{ Write-Host "[BuhoAgent] $message" -ForegroundColor Cyan }}
         function Write-ErrorStep($message) {{ Write-Host "[BuhoAgent] ERROR: $message" -ForegroundColor Red }}
@@ -415,7 +432,7 @@ def build_windows_installer(server_url: str, token: str):
             token = $Token
             heartbeat_interval = 15
             metrics_interval = 10
-            processes_interval = 15
+            processes_interval = 30
             log_file = $LogPath
         }}
         $cfgJson = ($config | ConvertTo-Json -Depth 6)
@@ -452,7 +469,15 @@ def build_windows_installer(server_url: str, token: str):
         $PyExeQuoted = '"' + $PyExe + '"'
         $AgentPyPathQuoted = '"' + $AgentPyPath + '"'
         $ConfigPathQuoted = '"' + $ConfigPath + '"'
-        $TaskCommand = "$PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted"
+        $RunnerScript = @"
+@echo off
+:loop
+$PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted
+timeout /t 5 /nobreak >nul
+goto loop
+"@
+        [System.IO.File]::WriteAllText($RunnerCmdPath, $RunnerScript, (New-Object System.Text.UTF8Encoding($false)))
+        $TaskCommand = '"' + $RunnerCmdPath + '"'
         $IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
         if ($IsAdmin) {{
@@ -513,7 +538,7 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     require_organization = True
 
     def get(self, request):
-        agents = self.scoped_agents(request)
+        agents = self.scoped_agents(request).annotate(last_metrics_at=Max("metric_points__ts"), last_processes_at=Max("process_samples__ts"), last_logs_at=Max("log_entries__ts"))
         provider = request.GET.get('provider', '')
         env = request.GET.get('env', '')
         if provider:
@@ -570,8 +595,27 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         logs = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
         incidents = Incident.objects.filter(agent=agent).order_by('-last_seen')[:100]
         latest_process_ts = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
-        processes = ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu')[:50] if latest_process_ts else []
-        return render(request, 'agents/detail.html', {'agent': agent, 'heartbeats': agent.heartbeats.all()[:20], 'apps': apps, 'labels': labels, 'cpu_values': cpu_values, 'mem_values': mem_values, 'disk_values': disk_values, 'net_in': net_in, 'net_out': net_out, 'logs': logs, 'incidents': incidents, 'processes': processes, 'time_range': time_range})
+        processes = ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu', '-mem')[:50] if latest_process_ts else []
+        last_metrics_at = MetricPoint.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
+        last_logs_at = LogEntry.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
+        return render(request, 'agents/detail.html', {
+            'agent': agent,
+            'heartbeats': agent.heartbeats.all()[:20],
+            'apps': apps,
+            'labels': labels,
+            'cpu_values': cpu_values,
+            'mem_values': mem_values,
+            'disk_values': disk_values,
+            'net_in': net_in,
+            'net_out': net_out,
+            'logs': logs,
+            'incidents': incidents,
+            'processes': processes,
+            'time_range': time_range,
+            'last_metrics_at': last_metrics_at,
+            'last_processes_at': latest_process_ts,
+            'last_logs_at': last_logs_at,
+        })
 
 
 class AgentsInstallView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
