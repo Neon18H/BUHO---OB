@@ -82,6 +82,17 @@ El agente descargable (`/agents/download/agent.py`) ahora incorpora:
 3. Revisa que el reloj del host sea correcto (desfases grandes afectan ventanas de heartbeat).
 4. En Buho, ejecutar `python manage.py evaluate_alerts` para recalcular alertas de heartbeat faltante.
 
+
+## Despliegue en Railway (CSRF/HTTPS)
+
+Configura estas variables de entorno en Railway para evitar `403 CSRF verification failed` en login/registro y otros POST del dashboard:
+
+- `DEBUG=0`
+- `ALLOWED_HOSTS=<domain>.up.railway.app`
+- `CSRF_TRUSTED_ORIGINS=https://<domain>.up.railway.app`
+
+Si tienes más de un dominio, usa valores separados por coma en `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS`.
+
 ## Provider/Discovery testing (local)
 
 - Simular **Railway**: ejecutar agente con variables `RAILWAY_ENVIRONMENT=production RAILWAY_PROJECT_ID=demo`.

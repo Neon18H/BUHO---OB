@@ -26,7 +26,7 @@
     <div class="card auth-card">
       <div class="card-body p-4">
         <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h4 m-0">Secure Access</h2><button class="btn btn-sm btn-outline-light" type="button" onclick="toggleTheme()"><i class="bi bi-circle-half"></i></button></div>
-        <form method="post">
+        <form method="POST">
           {% csrf_token %}
           <label class="form-label">Usuario</label>
           <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-person"></i></span>{{ form.username }}</div>
