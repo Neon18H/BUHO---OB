@@ -30,3 +30,8 @@ class ProcessesSerializer(serializers.Serializer):
 
 class LogsSerializer(serializers.Serializer):
     logs = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+
+
+class AppsSerializer(serializers.Serializer):
+    ts = serializers.DateTimeField(required=False)
+    apps = serializers.ListField(child=serializers.DictField(), allow_empty=False)

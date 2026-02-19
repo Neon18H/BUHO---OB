@@ -13,4 +13,6 @@
   <div class="col-lg-4"><div class="card p-3"><h6>Status</h6><p>{{ agent.get_status_display }}</p><h6>Last seen</h6><p>{{ agent.last_seen|date:'Y-m-d H:i:s' }}</p><h6>Version</h6><p>{{ agent.version }}</p></div></div>
   <div class="col-lg-8"><div class="card p-3"><h6>Heartbeats recientes</h6><table class="table table-sm"><thead><tr><th>Timestamp</th><th>Status</th><th>Metadata</th></tr></thead><tbody>{% for hb in heartbeats %}<tr><td>{{ hb.ts|date:'Y-m-d H:i:s' }}</td><td>{{ hb.status }}</td><td><code>{{ hb.metadata_json }}</code></td></tr>{% empty %}<tr><td colspan="3">Sin heartbeats aún.</td></tr>{% endfor %}</tbody></table></div></div>
 </div>
+<div class="row g-3 mt-1">
+  <div class="col-12"><div class="card p-3"><h6>Apps detectadas</h6><table class="table table-sm"><thead><tr><th>Nombre</th><th>Tipo</th><th>PID</th><th>Puertos</th><th>Last seen</th></tr></thead><tbody>{% for app in apps %}<tr><td>{{ app.name }}</td><td>{{ app.kind }}</td><td>{{ app.pid|default:'-' }}</td><td><code>{{ app.ports_json }}</code></td><td>{{ app.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">Sin apps detectadas.</td></tr>{% endfor %}</tbody></table></div></div>
 {% endblock %}

@@ -15,7 +15,7 @@ from django.views import View
 
 from accounts.forms import InitialRegistrationForm, OrganizationForm, OrganizationUserCreateForm, OrganizationUserUpdateForm
 from accounts.models import Organization
-from agents.models import Agent, Incident, LogEntry, MetricPoint, ProcessSample
+from agents.models import Agent, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample
 from audit.models import AuditLog
 from audit.utils import create_audit_log
 from dashboards.models import Dashboard, DashboardWidget
@@ -32,9 +32,14 @@ class OrgScopedMixin:
 def _sync_agent_status_for_org(org):
     if not org:
         return
-    cutoff = timezone.now() - timedelta(seconds=getattr(settings, 'AGENT_OFFLINE_SECONDS', 90))
-    Agent.objects.filter(organization=org, last_seen__lt=cutoff).exclude(status=Agent.Status.OFFLINE).update(status=Agent.Status.OFFLINE)
-    Agent.objects.filter(organization=org, last_seen__gte=cutoff).exclude(status=Agent.Status.ONLINE).update(status=Agent.Status.ONLINE)
+    now = timezone.now()
+    offline_seconds = getattr(settings, 'AGENT_OFFLINE_SECONDS', 90)
+    degraded_seconds = getattr(settings, 'AGENT_DEGRADED_SECONDS', 30)
+    offline_cutoff = now - timedelta(seconds=offline_seconds)
+    degraded_cutoff = now - timedelta(seconds=degraded_seconds)
+    Agent.objects.filter(organization=org, last_seen__lt=offline_cutoff).exclude(status=Agent.Status.OFFLINE).update(status=Agent.Status.OFFLINE)
+    Agent.objects.filter(organization=org, last_seen__lt=degraded_cutoff, last_seen__gte=offline_cutoff).exclude(status=Agent.Status.DEGRADED).update(status=Agent.Status.DEGRADED)
+    Agent.objects.filter(organization=org, last_seen__gte=degraded_cutoff).exclude(status=Agent.Status.ONLINE).update(status=Agent.Status.ONLINE)
 
 
 class BuhoLoginView(LoginView):
@@ -231,11 +236,13 @@ class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
         return render(request, 'ui/server_detail.html', {'server': server})
 
 
-class AppsListView(RoleRequiredMixin, View):
+class AppsListView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
     def get(self, request):
-        return render(request, 'ui/apps.html', {'apps': []})
+        org = self.get_org(request)
+        apps = DetectedApp.objects.filter(organization=org).select_related('agent').order_by('-last_seen') if org else DetectedApp.objects.none()
+        return render(request, 'ui/apps.html', {'apps': apps[:200]})
 
 
 class LogsExplorerView(RoleRequiredMixin, OrgScopedMixin, View):
