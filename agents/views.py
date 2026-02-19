@@ -1,3 +1,4 @@
+import logging
 from textwrap import dedent
 from datetime import timedelta
 
@@ -15,11 +16,13 @@ from .models import Agent, AgentEnrollmentToken, DetectedApp
 
 
 AGENT_REQUIREMENTS = "requests\npsutil\n"
+logger = logging.getLogger(__name__)
 
 
 def build_agent_py():
-    return dedent(dedent(
+    return (
         """
+        #!/usr/bin/env python3
         import argparse
         import json
         import os
@@ -69,18 +72,18 @@ def build_agent_py():
         def get_disk_target():
             if os.name == "nt":
                 system_drive = os.environ.get("SystemDrive", "C:")
-                return os.path.join(system_drive, "\\")
+                return os.path.join(system_drive, "\\\\")
             return "/"
 
         def enqueue_spool(path, event):
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             with p.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(event) + "\n")
+                handle.write(json.dumps(event) + "\\n")
             lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]
-            while len("\n".join(lines).encode("utf-8")) > 50 * 1024 * 1024 and lines:
+            while len("\\n".join(lines).encode("utf-8")) > 50 * 1024 * 1024 and lines:
                 lines = lines[1:]
-            p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            p.write_text("\\n".join(lines) + ("\\n" if lines else ""), encoding="utf-8")
 
         def flush_spool(cfg, headers):
             p = Path(cfg["spool_file"])
@@ -97,7 +100,7 @@ def build_agent_py():
                         keep.append(line)
                 except Exception:
                     keep.append(line)
-            p.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+            p.write_text("\\n".join(keep) + ("\\n" if keep else ""), encoding="utf-8")
 
         def post_with_retry(cfg, headers, path, payload):
             for wait in [1, 2, 5, 10, 20, 30, 45, 60]:
@@ -112,7 +115,7 @@ def build_agent_py():
             return False
 
         def collect_metrics():
-            root = get_disk_target()
+            disk_target = get_disk_target()
             vm = psutil.virtual_memory()
             net = psutil.net_io_counters()
             rows = [
@@ -129,7 +132,7 @@ def build_agent_py():
             except Exception:
                 pass
             try:
-                rows.append({"name": "disk.root.used_percent", "value": psutil.disk_usage(root).percent, "unit": "%"})
+                rows.append({"name": "disk.root.used_percent", "value": psutil.disk_usage(disk_target).percent, "unit": "%"})
             except Exception:
                 pass
             for part in psutil.disk_partitions(all=False):
@@ -307,7 +310,7 @@ def build_agent_py():
                     time.sleep(1)
                 except Exception as exc:
                     with open(cfg.get("log_file", "buho-agent.log"), "a", encoding="utf-8") as handle:
-                        handle.write(f"{utc_now()} loop-error {exc}\n")
+                        handle.write(f"{utc_now()} loop-error {exc}\\n")
                     if once:
                         raise
                     time.sleep(5)
@@ -330,7 +333,7 @@ def build_agent_py():
         if __name__ == "__main__":
             main()
         """
-    )).strip() + "\n"
+    ).replace("\n        ", "\n").lstrip().rstrip() + "\n"
 
 
 def build_windows_installer(server_url: str, token: str):
@@ -422,7 +425,7 @@ def build_windows_installer(server_url: str, token: str):
         Write-Host "[BuhoAgent] Logs: C:\\ProgramData\\BuhoAgent\\buho-agent.log" -ForegroundColor Green
         Write-Host "[BuhoAgent] Verifica ONLINE en: $BuhoUrl/agents/overview" -ForegroundColor Green
         """
-    ).strip() + "\n"
+    ).replace("\n        ", "\n").lstrip().rstrip() + "\n"
 
 
 class AgentOrganizationMixin:
@@ -630,7 +633,14 @@ class AgentDownloadWindowsView(View):
 
 class AgentDownloadAgentPyView(View):
     def get(self, request):
-        response = HttpResponse(build_agent_py(), content_type='text/x-python')
+        agent_code = build_agent_py()
+        try:
+            compile(agent_code, 'agent.py', 'exec')
+        except Exception:
+            logger.exception('agent.py generator produced invalid python')
+            return HttpResponse('agent.py generator produced invalid python', status=500, content_type='text/plain')
+
+        response = HttpResponse(agent_code, content_type='text/x-python')
         response['Content-Disposition'] = 'attachment; filename="agent.py"'
         return response
 

@@ -34,6 +34,20 @@ class AgentDownloadScriptTests(TestCase):
             agent_path.write_text(script, encoding='utf-8')
             py_compile.compile(str(agent_path), doraise=True)
 
+    def test_generated_agent_py_has_no_leading_blank_or_global_indent(self):
+        script = build_agent_py()
+
+        self.assertTrue(script.startswith('#!/usr/bin/env python3\n'))
+        self.assertNotEqual(script[0], '\n')
+        self.assertEqual(script[0], '#')
+
+    def test_download_endpoint_returns_valid_python(self):
+        response = self.client.get(reverse('agents:download_agent_py'))
+
+        self.assertEqual(response.status_code, 200)
+        script = response.content.decode('utf-8')
+        compile(script, 'agent.py', 'exec')
+
     def test_windows_installer_fails_fast_before_scheduled_task(self):
         script = build_windows_installer('http://buho.example', 'tok123')
 
