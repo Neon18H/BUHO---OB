@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-background text-slate-100 min-h-screen antialiased;
+  background-image:
+    radial-gradient(circle at top, rgba(34, 211, 238, 0.1), transparent 40%),
+    radial-gradient(circle at bottom right, rgba(30, 64, 175, 0.1), transparent 40%);
+}
+
+.noc-grid {
+  background-size: 36px 36px;
+  background-image: theme('backgroundImage.noc-grid');
+}
+
+.glass {
+  @apply bg-slate-950/50 backdrop-blur-md border border-slate-800;
+}
