@@ -1,12 +1,4 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
 {% block content %}
-<h1 class="h4 mb-3">{{ server.name }}</h1>
-<div class="card p-3">
-  <div><strong>Hostname:</strong> {{ server.hostname }}</div>
-  <div><strong>IP:</strong> {{ server.ip_address }}</div>
-  <div><strong>OS:</strong> {{ server.os }} ({{ server.arch }})</div>
-  <div><strong>Version:</strong> {{ server.version }}</div>
-  <div><strong>Status:</strong> {{ server.status }}</div>
-  <div><strong>Last seen:</strong> {{ server.last_seen|date:'Y-m-d H:i:s' }}</div>
-</div>
+<div id="app-root" data-page="serverDetail" data-server-id="{{ server.id }}"></div>
 {% endblock %}

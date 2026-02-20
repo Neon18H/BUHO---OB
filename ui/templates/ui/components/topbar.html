@@ -11,6 +11,6 @@
         <button class="btn btn-sm btn-outline-info"><i class="bi bi-bell"></i></button>
         <span class="badge" style="background:#1f3250;color:#9fe8ff;">{{ request.user.get_role_display }}</span>
         <div class="user-pill"><i class="bi bi-person-circle"></i><span>{{ request.user.username }}</span></div>
-        <a class="btn btn-sm btn-outline-danger" href="{% url 'accounts:logout' %}">Logout</a>
+        <form method="POST" action="/logout/">{% csrf_token %}<button class="btn btn-sm btn-outline-danger" type="submit">Logout</button></form>
     </div>
 </nav>
