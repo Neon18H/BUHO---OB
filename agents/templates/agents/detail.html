@@ -2,11 +2,36 @@
 {% block breadcrumbs %}Agents / {{ agent.hostname }}{% endblock %}
 {% block content %}
 <div x-data="{tab:'metrics'}" class="space-y-4">
-  <div class="glass p-4 flex justify-between items-center"><div><h1 class="text-xl">{{ agent.hostname }}</h1><p class="text-sm text-slate-400">{{ agent.get_provider_display }} · {{ agent.os }} · {{ agent.ip_address }}</p></div><a href="{% url 'agents:agent_threats' agent.id %}" class="btn-noc btn-danger-noc">Acción Nocturna</a></div>
+  <div class="glass p-4 flex justify-between items-center"><div><h1 class="text-xl">{{ agent.hostname }}</h1><p class="text-sm text-slate-400">{{ agent.get_provider_display }} · {{ agent.os }} · {{ agent.ip_address }}</p></div><a href="{% url 'agents:agent_threats' agent.id %}" class="btn-noc btn-danger-noc">Threats</a></div>
+
+  <div class="glass p-4 space-y-3">
+    <h2 class="text-lg">Acción Nocturna</h2>
+    <form method="post" class="grid grid-cols-1 md:grid-cols-2 gap-3">{% csrf_token %}
+      <input type="hidden" name="action" value="run_night_scan" />
+      <div><label>Rutas</label><textarea name="paths" class="w-full">{% for p in agent_config.scan_paths %}{{ p }}
+{% endfor %}</textarea></div>
+      <div><label>Exclusiones</label><textarea name="exclusions" class="w-full">{% for p in agent_config.exclusions %}{{ p }}
+{% endfor %}</textarea></div>
+      <label><input type="checkbox" name="virustotal_enabled" {% if vt_available %}checked{% endif %} {% if not vt_available %}disabled{% endif %}/> Usar VirusTotal</label>
+      <button class="btn-noc btn-primary-noc" type="submit">Iniciar Acción Nocturna</button>
+    </form>
+    <div hx-get="{% url 'agents:detail_tab' agent.id 'threats' %}" hx-trigger="load, every 10s" hx-target="#night-results" class="text-sm text-slate-400">Estado comando: {{ latest_nocturnal_run.status|default:'N/A' }}</div>
+    <div id="night-results"></div>
+    <h3 class="text-md">Resultados recientes</h3>
+    <table class="table-noc"><thead><tr><th>Sev</th><th>Path</th><th>Rule</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
+      {% for f in recent_findings %}
+      <tr>
+        <td>{{ f.severity }}</td><td>{{ f.file_path }}</td><td>{{ f.yara_rule }}</td><td>{{ f.status }}</td>
+        <td class="flex gap-2">
+          <form method="post">{% csrf_token %}<input type="hidden" name="action" value="quarantine_file"><input type="hidden" name="file_path" value="{{ f.file_path }}"><button class="btn-noc">Cuarentena</button></form>
+          <form method="post">{% csrf_token %}<input type="hidden" name="action" value="ack_finding"><input type="hidden" name="finding_id" value="{{ f.id }}"><button class="btn-noc">Marcar revisado</button></form>
+        </td>
+      </tr>
+      {% empty %}<tr><td colspan="5">Sin resultados.</td></tr>{% endfor %}
+    </tbody></table>
+  </div>
+
   <div class="flex flex-wrap gap-2">{% for t in agent_tabs %}<button class="tab-btn" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'agents:detail_tab' agent.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#tab-content'})">{{ t|title }}</button>{% endfor %}</div>
-  {% if not labels and not apps and not logs and not incidents and not processes %}
-  <div class="glass p-4 text-slate-300">{{ no_data_message }}</div>
-  {% endif %}
   <div id="tab-content" class="glass p-4" hx-get="{% url 'agents:detail_tab' agent.id 'metrics' %}" hx-trigger="load">Loading...</div>
 </div>
 {% endblock %}

@@ -62,3 +62,24 @@ class SecurityFindingsSerializer(serializers.Serializer):
 
 class SecurityArtifactsSerializer(serializers.Serializer):
     artifacts = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+
+
+class NightScanCommandSerializer(serializers.Serializer):
+    agent_id = serializers.IntegerField()
+    paths = serializers.ListField(child=serializers.CharField(), required=False)
+    exclusions = serializers.ListField(child=serializers.CharField(), required=False)
+    vt = serializers.BooleanField(required=False, default=False)
+
+
+class QuarantineCommandSerializer(serializers.Serializer):
+    agent_id = serializers.IntegerField()
+    file_path = serializers.CharField()
+    method = serializers.CharField(required=False, default='move')
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class AgentCommandResultSerializer(serializers.Serializer):
+    command_id = serializers.UUIDField()
+    status = serializers.ChoiceField(choices=['DONE', 'FAILED'])
+    result = serializers.JSONField(required=False)
+    error = serializers.CharField(required=False, allow_blank=True)

@@ -10,7 +10,7 @@
 </div>
 <div class="glass p-4">
   <table class="table-noc"><thead><tr><th>Agent</th><th>Path/Title</th><th>Yara/VT</th><th>Severity</th><th>Time</th></tr></thead><tbody>
-  {% for finding in recent_findings %}<tr><td>{{ finding.agent.name }}</td><td>{{ finding.title }}</td><td>{{ finding.category }}</td><td>{{ finding.severity }}</td><td>{{ finding.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings yet.</td></tr>{% endfor %}
+  {% for finding in recent_findings %}<tr><td>{{ finding.agent.name }}</td><td>{{ finding.file_path }}</td><td>{{ finding.yara_rule }}</td><td>{{ finding.severity }}</td><td>{{ finding.created_at|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings yet.</td></tr>{% endfor %}
   </tbody></table>
 </div>
 {% endblock %}

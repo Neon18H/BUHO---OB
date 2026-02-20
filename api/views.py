@@ -6,10 +6,11 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 
 from agents.incidents import evaluate_http_incidents, evaluate_log_incidents, evaluate_metric_incidents
 from agents.health import calculate_agent_health, calculate_app_health
-from agents.models import Agent, AgentCommand, AgentEnrollmentToken, AgentHeartbeat, DetectedApp, LogEntry, MetricPoint, NocturnalScanRun, ProcessSample
+from agents.models import Agent, AgentCommand, AgentEnrollmentToken, AgentHeartbeat, DetectedApp, Incident, LogEntry, MetricPoint, NocturnalScanRun, ProcessSample, ThreatFinding
 from agents.security import redact_payload, redact_text
 from agents.threats import ingest_artifacts, ingest_findings
 from audit.models import AuditLog
@@ -26,6 +27,9 @@ from .serializers import (
     ProcessesSerializer,
     SecurityArtifactsSerializer,
     SecurityFindingsSerializer,
+    NightScanCommandSerializer,
+    QuarantineCommandSerializer,
+    AgentCommandResultSerializer,
 )
 
 
@@ -307,6 +311,61 @@ class AgentDiscoveryIngestApiView(APIView, AgentAuthMixin):
         return Response({'ok': True, 'health_score': health, 'apps': len(serializer.validated_data.get('apps') or [])})
 
 
+class NightScanCommandApiView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role not in {'SUPERADMIN', 'SUPER_ADMIN', 'ORG_ADMIN'}:
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = NightScanCommandSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        org = request.user.organization
+        agent = Agent.objects.filter(id=serializer.validated_data['agent_id'], organization=org).first()
+        if not agent:
+            return Response({'detail': 'Agent not found'}, status=status.HTTP_404_NOT_FOUND)
+        payload = {
+            'paths': serializer.validated_data.get('paths') or [],
+            'exclusions': serializer.validated_data.get('exclusions') or [],
+            'vt': bool(serializer.validated_data.get('vt', False)),
+        }
+        command = AgentCommand.objects.create(
+            organization=org,
+            agent=agent,
+            command_type=AgentCommand.CommandType.NIGHT_SCAN,
+            payload_json=payload,
+            status=AgentCommand.Status.PENDING,
+            issued_by=request.user,
+        )
+        return Response({'command_id': str(command.id)})
+
+
+class QuarantineCommandApiView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role not in {'SUPERADMIN', 'SUPER_ADMIN', 'ORG_ADMIN'}:
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = QuarantineCommandSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        org = request.user.organization
+        agent = Agent.objects.filter(id=serializer.validated_data['agent_id'], organization=org).first()
+        if not agent:
+            return Response({'detail': 'Agent not found'}, status=status.HTTP_404_NOT_FOUND)
+        command = AgentCommand.objects.create(
+            organization=org,
+            agent=agent,
+            command_type=AgentCommand.CommandType.QUARANTINE_FILE,
+            payload_json={
+                'file_path': serializer.validated_data['file_path'],
+                'method': serializer.validated_data.get('method', 'move'),
+                'reason': serializer.validated_data.get('reason', ''),
+            },
+            status=AgentCommand.Status.PENDING,
+            issued_by=request.user,
+        )
+        return Response({'command_id': str(command.id)})
+
+
 class AgentCommandPollApiView(APIView, AgentAuthMixin):
     authentication_classes = []
     permission_classes = []
@@ -315,28 +374,19 @@ class AgentCommandPollApiView(APIView, AgentAuthMixin):
         agent = self.get_agent_from_headers(request)
         if not agent:
             return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-        command = AgentCommand.objects.filter(
+        commands = list(AgentCommand.objects.filter(
             organization=agent.organization,
             agent=agent,
             status=AgentCommand.Status.PENDING,
-        ).order_by('created_at').first()
-        if not command:
-            return Response({'command': None})
-        command.status = AgentCommand.Status.SENT
-        command.save(update_fields=['status', 'updated_at'])
-        return Response(
-            {
-                'command': {
-                    'id': str(command.id),
-                    'type': command.command_type,
-                    'payload': command.payload_json,
-                    'created_at': command.created_at,
-                }
-            }
-        )
+        ).order_by('created_at')[:10])
+        if not commands:
+            return Response({'commands': []})
+        now = timezone.now()
+        AgentCommand.objects.filter(id__in=[c.id for c in commands]).update(status=AgentCommand.Status.RUNNING, started_at=now)
+        return Response({'commands': [{'id': str(c.id), 'type': c.command_type, 'payload': c.payload_json, 'created_at': c.created_at} for c in commands]})
 
 
-class AgentCommandAckApiView(APIView, AgentAuthMixin):
+class AgentCommandResultApiView(APIView, AgentAuthMixin):
     authentication_classes = []
     permission_classes = []
 
@@ -344,37 +394,57 @@ class AgentCommandAckApiView(APIView, AgentAuthMixin):
         agent = self.get_agent_from_headers(request)
         if not agent:
             return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-        serializer = AgentCommandAckSerializer(data=request.data)
+        serializer = AgentCommandResultSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         command = AgentCommand.objects.filter(id=data['command_id'], agent=agent, organization=agent.organization).first()
         if not command:
             return Response({'detail': 'Command not found'}, status=status.HTTP_404_NOT_FOUND)
-        command.status = data['status']
-        command.save(update_fields=['status', 'updated_at'])
+        command.status = AgentCommand.Status.DONE if data['status'] == 'DONE' else AgentCommand.Status.FAILED
+        command.finished_at = timezone.now()
+        command.result_json = data.get('result') or {}
+        command.error_text = data.get('error', '')
+        command.save(update_fields=['status', 'finished_at', 'result_json', 'error_text', 'updated_at'])
 
-        run = NocturnalScanRun.objects.filter(organization=agent.organization, agent=agent, ended_at__isnull=True).order_by('-started_at').first()
-        if data['status'] == AgentCommand.Status.RUNNING and not run:
-            run = NocturnalScanRun.objects.create(
-                organization=agent.organization,
-                agent=agent,
-                status=NocturnalScanRun.Status.RUNNING,
-                config_snapshot_json=command.payload_json,
+        if command.command_type == AgentCommand.CommandType.NIGHT_SCAN and command.status == AgentCommand.Status.DONE:
+            findings = (command.result_json or {}).get('findings') or []
+            for finding in findings:
+                sev = (finding.get('severity') or 'MED').upper()
+                if sev not in {'LOW', 'MED', 'HIGH', 'CRIT'}:
+                    sev = 'MED'
+                created = ThreatFinding.objects.create(
+                    organization=agent.organization,
+                    agent=agent,
+                    file_path=finding.get('file_path') or 'unknown',
+                    file_hash_sha256=finding.get('file_hash_sha256') or None,
+                    yara_rule=finding.get('yara_rule') or '',
+                    yara_tags=finding.get('yara_tags') or [],
+                    vt_score=finding.get('vt_score'),
+                    vt_permalink=finding.get('vt_permalink') or None,
+                    severity=sev,
+                )
+                Incident.objects.create(
+                    organization=agent.organization,
+                    agent=agent,
+                    type=Incident.Type.MALWARE_SUSPECT,
+                    severity='CRITICAL' if sev == 'CRIT' else ('HIGH' if sev == 'HIGH' else 'MEDIUM'),
+                    status=Incident.Status.OPEN,
+                    context_json={'message': f"YARA match {created.yara_rule} en {created.file_path}", 'finding_id': str(created.id)},
+                )
+        if command.command_type == AgentCommand.CommandType.QUARANTINE_FILE and command.status == AgentCommand.Status.DONE:
+            fp = (command.payload_json or {}).get('file_path')
+            ThreatFinding.objects.filter(organization=agent.organization, agent=agent, file_path=fp, status=ThreatFinding.Status.OPEN).update(
+                action_taken=ThreatFinding.ActionTaken.QUARANTINED,
+                quarantine_path=(command.result_json or {}).get('quarantine_path') or '',
             )
-        if run:
-            run.last_progress = data.get('progress', run.last_progress)
-            run.last_message = data.get('message', run.last_message)
-            if data.get('stats'):
-                run.stats_json = data['stats']
-            if data['status'] in {AgentCommand.Status.COMPLETED, AgentCommand.Status.CANCELED}:
-                run.status = NocturnalScanRun.Status.STOPPED if data['status'] == AgentCommand.Status.CANCELED else NocturnalScanRun.Status.COMPLETED
-                run.ended_at = timezone.now()
-            elif data['status'] == AgentCommand.Status.FAILED:
-                run.status = NocturnalScanRun.Status.FAILED
-                run.ended_at = timezone.now()
-            elif data['status'] == AgentCommand.Status.RUNNING:
-                run.status = NocturnalScanRun.Status.RUNNING
-            run.save()
+        return Response({'ok': True})
+
+
+class AgentCommandAckApiView(APIView, AgentAuthMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
         return Response({'ok': True})
 
 

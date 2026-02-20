@@ -7,6 +7,7 @@
         <a class="nav-link {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'ui:overview' %}"><i class="bi bi-speedometer2"></i><span>Overview</span></a>
         <a class="nav-link {% if request.resolver_match.url_name == 'servers' %}active{% endif %}" href="{% url 'ui:servers' %}"><i class="bi bi-hdd-network"></i><span>Servers</span></a>
         <a class="nav-link {% if request.resolver_match.namespace == 'agents' %}active{% endif %}" href="{% url 'agents:overview' %}"><i class="bi bi-robot"></i><span>Agents</span></a>
+        <a class="nav-link {% if request.resolver_match.namespace == 'agents' and 'threat' in request.path %}active{% endif %}" href="{% url 'agents:threats_overview' %}"><i class="bi bi-shield-exclamation"></i><span>Threats</span></a>
         <a class="nav-link {% if request.resolver_match.url_name == 'apps' %}active{% endif %}" href="{% url 'ui:apps' %}"><i class="bi bi-box-seam"></i><span>Apps</span></a>
         {% if request.user.role != 'VIEWER' %}
         <a class="nav-link {% if request.resolver_match.url_name == 'logs' %}active{% endif %}" href="{% url 'ui:logs' %}"><i class="bi bi-file-earmark-text"></i><span>Logs</span></a>

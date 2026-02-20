@@ -16,7 +16,7 @@ from accounts.models import Organization
 from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
-from .models import Agent, AgentCommand, AgentEnrollmentToken, DetectedApp, Incident, LogEntry, MetricPoint, NocturnalScanRun, ProcessSample, SecurityFinding
+from .models import Agent, AgentCommand, AgentConfig, AgentEnrollmentToken, DetectedApp, Incident, LogEntry, MetricPoint, NocturnalScanRun, ProcessSample, SecurityFinding, ThreatFinding
 
 
 AGENT_REQUIREMENTS = "requests\npsutil\nyara-python\n"
@@ -172,65 +172,74 @@ def build_agent_py():
                     h.update(chunk)
             return h.hexdigest()
 
-        def poll_command(cfg, headers):
+        def poll_commands(cfg, headers):
             try:
                 response = requests.get(cfg["server_url"] + "/api/agent/commands/poll", headers=headers, timeout=(3, 5))
                 if response.status_code >= 300:
-                    return None
-                return response.json().get("command")
+                    return []
+                return response.json().get("commands") or []
             except Exception:
-                return None
+                return []
 
-        def ack_command(cfg, headers, command_id, status, progress=0, message="", stats=None):
-            payload = {"command_id": command_id, "status": status, "progress": progress, "message": message, "stats": stats or {}}
+        def send_command_result(cfg, headers, command_id, ok=True, result=None, error=""):
+            payload = {"command_id": command_id, "status": "DONE" if ok else "FAILED", "result": result or {}, "error": error}
             try:
-                post_json(cfg["server_url"] + "/api/agent/commands/ack", payload, headers=headers, timeout=(3, 5))
+                post_json(cfg["server_url"] + "/api/agent/commands/result", payload, headers=headers, timeout=(3, 5))
             except Exception:
                 pass
 
-        def run_nocturnal_cycle(cfg, headers, state):
-            noct = cfg.get("nocturnal") or {}
-            paths = noct.get("paths") or (["C:/Windows/Temp"] if os.name == "nt" else ["/tmp", "/var/tmp"])
-            max_files = int(noct.get("max_files_per_cycle", 200))
-            max_size = int(noct.get("max_file_size_mb", 20)) * 1024 * 1024
-            scan_state = load_json(get_scan_state_path(), {"files": {}})
-            artifacts, findings = [], []
+        def _compile_demo_rules():
+            try:
+                import yara
+                return yara.compile(source='rule SuspiciousScript { strings: $a = "Invoke-WebRequest" nocase condition: $a }')
+            except Exception:
+                return None
+
+        def scan_yara(cfg, payload):
+            rules = _compile_demo_rules()
+            paths = payload.get("paths") or (["C:/Users", "C:/ProgramData"] if os.name == "nt" else ["/home", "/var/www"])
+            exclusions = set(payload.get("exclusions") or ["venv", ".git", "node_modules", "Windows\\WinSxS"])
+            max_files = int(payload.get("max_files", 2000))
+            max_file_mb = int(payload.get("max_file_mb", 30))
+            findings, errors = [], []
             scanned = 0
             for root in paths:
                 if scanned >= max_files:
                     break
-                p = Path(root)
-                if not p.exists():
+                rp = Path(root)
+                if not rp.exists():
                     continue
-                for fp in p.rglob("*"):
+                for fp in rp.rglob("*"):
                     if scanned >= max_files:
                         break
                     try:
-                        if not fp.is_file():
+                        if any(ex in str(fp) for ex in exclusions) or not fp.is_file():
                             continue
-                        stat = fp.stat()
-                        if stat.st_size > max_size:
+                        if fp.stat().st_size > max_file_mb * 1024 * 1024:
                             continue
-                        prev = (scan_state.get("files") or {}).get(str(fp))
-                        marker = f"{int(stat.st_mtime)}:{stat.st_size}"
-                        if prev == marker:
-                            continue
-                        sha = sha256_file(fp)
-                        artifacts.append({"path": redact(str(fp))[:255], "sha256": sha, "size": stat.st_size, "mtime": stat.st_mtime, "ts": utc_now()})
-                        scan_state.setdefault("files", {})[str(fp)] = marker
                         scanned += 1
-                    except Exception:
+                        sha = sha256_file(fp)
+                        matches = rules.match(str(fp)) if rules else []
+                        for m in matches:
+                            findings.append({"file_path": str(fp), "file_hash_sha256": sha, "yara_rule": m.rule, "yara_tags": m.tags, "severity": "HIGH" if "malware" in m.tags else "MED"})
+                    except Exception as exc:
+                        errors.append(str(exc)[:180])
                         continue
-            if artifacts:
-                post_with_retry(cfg, headers, "/api/ingest/security/artifacts", {"artifacts": artifacts, "vt_threshold": int(noct.get("vt_threshold", 3))})
-            if findings:
-                post_with_retry(cfg, headers, "/api/ingest/security/findings", {"findings": findings})
-            save_json(get_scan_state_path(), scan_state)
-            state["nocturnal_stats"] = {
-                "files_scanned": scanned,
-                "hashes_checked": len(artifacts),
-                "yara_matches": len(findings),
-            }
+            return {"findings": findings, "scanned_files": scanned, "matched": len(findings), "duration_sec": 0, "errors": errors}
+
+        def quarantine_file(payload):
+            source = payload.get("file_path")
+            if not source:
+                return {"error": "missing file_path"}
+            src = Path(source)
+            if not src.exists():
+                return {"error": "file not found"}
+            qdir = Path("C:/ProgramData/BuhoAgent/quarantine" if os.name == "nt" else "/var/lib/buho-agent/quarantine")
+            qdir.mkdir(parents=True, exist_ok=True)
+            target = qdir / f"{int(time.time())}-{sha256_file(src)}-{src.name}"
+            src.rename(target)
+            return {"quarantine_path": str(target)}
+
 
         def collect_metrics():
             disk_target = get_disk_target()
@@ -452,16 +461,20 @@ def build_agent_py():
                         sent_logs_minute = 0
                     flush_spool(cfg, headers)
                     if now - last["command_poll"] >= cfg["command_poll_interval"]:
-                        command = poll_command(cfg, headers)
-                        if command and command.get("id"):
+                        commands = poll_commands(cfg, headers)
+                        for command in commands:
                             ctype = command.get("type")
-                            if ctype == "START_NOCTURNAL_SCAN":
-                                cfg["nocturnal"].update(command.get("payload") or {})
-                                cfg["nocturnal"]["active"] = True
-                                ack_command(cfg, headers, command["id"], "RUNNING", progress=1, message="Nocturnal scan running")
-                            elif ctype == "STOP_NOCTURNAL_SCAN":
-                                cfg["nocturnal"]["active"] = False
-                                ack_command(cfg, headers, command["id"], "CANCELED", progress=100, message="Nocturnal scan stopped", stats=state.get("nocturnal_stats") or {})
+                            try:
+                                if ctype in {"NIGHT_SCAN", "START_NOCTURNAL_SCAN"}:
+                                    result = scan_yara(cfg, command.get("payload") or {})
+                                    send_command_result(cfg, headers, command["id"], ok=True, result=result)
+                                elif ctype == "QUARANTINE_FILE":
+                                    result = quarantine_file(command.get("payload") or {})
+                                    send_command_result(cfg, headers, command["id"], ok=("error" not in result), result=result, error=result.get("error", ""))
+                                else:
+                                    send_command_result(cfg, headers, command["id"], ok=False, error=f"unsupported command {ctype}")
+                            except Exception as exc:
+                                send_command_result(cfg, headers, command["id"], ok=False, error=str(exc))
                         last["command_poll"] = now
                     if now - last["heartbeat"] >= cfg["heartbeat_interval"]:
                         post_with_retry(cfg, headers, "/api/agents/heartbeat", {"status": "ONLINE", "metadata": {"agent_version": VERSION}})
@@ -490,9 +503,6 @@ def build_agent_py():
                             post_with_retry(cfg, headers, "/api/ingest/logs", {"logs": logs})
                             sent_logs_minute += len(logs)
                         last["logs"] = now
-                    if cfg.get("nocturnal", {}).get("active") and now - last["nocturnal"] >= int(cfg.get("nocturnal", {}).get("interval_seconds", 60)):
-                        run_nocturnal_cycle(cfg, headers, state)
-                        last["nocturnal"] = now
                     save_json(state_path, state)
                     if once:
                         return
@@ -811,35 +821,41 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     def post(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
         action = request.POST.get('action')
-        if action == 'start_nocturnal':
+        if action == 'run_night_scan':
+            paths = [p.strip() for p in (request.POST.get('paths') or '').splitlines() if p.strip()]
+            exclusions = [p.strip() for p in (request.POST.get('exclusions') or '').splitlines() if p.strip()]
             payload = {
-                'paths': [p.strip() for p in (request.POST.get('paths') or '').splitlines() if p.strip()],
-                'yara_enabled': request.POST.get('yara_enabled') == 'on',
-                'virustotal_enabled': request.POST.get('virustotal_enabled') == 'on',
-                'max_files_per_cycle': int(request.POST.get('max_files_per_cycle') or 200),
-                'interval_seconds': int(request.POST.get('interval_seconds') or 60),
-                'max_file_size_mb': int(request.POST.get('max_file_size_mb') or 20),
-                'vt_threshold': int(request.POST.get('vt_threshold') or 3),
+                'paths': paths,
+                'exclusions': exclusions,
+                'vt': request.POST.get('virustotal_enabled') == 'on',
             }
             AgentCommand.objects.create(
                 organization=agent.organization,
                 agent=agent,
-                command_type=AgentCommand.CommandType.START_NOCTURNAL_SCAN,
+                command_type=AgentCommand.CommandType.NIGHT_SCAN,
                 payload_json=payload,
                 status=AgentCommand.Status.PENDING,
                 issued_by=request.user,
             )
             messages.success(request, 'Acción Nocturna enviada al agente.')
-        elif action == 'stop_nocturnal':
+        elif action == 'quarantine_file':
             AgentCommand.objects.create(
                 organization=agent.organization,
                 agent=agent,
-                command_type=AgentCommand.CommandType.STOP_NOCTURNAL_SCAN,
-                payload_json={},
+                command_type=AgentCommand.CommandType.QUARANTINE_FILE,
+                payload_json={
+                    'file_path': request.POST.get('file_path', ''),
+                    'method': 'move',
+                    'reason': request.POST.get('reason', 'manual action'),
+                },
                 status=AgentCommand.Status.PENDING,
                 issued_by=request.user,
             )
-            messages.success(request, 'Comando de detención enviado.')
+            messages.success(request, 'Comando de cuarentena enviado.')
+        elif action == 'ack_finding':
+            finding_id = request.POST.get('finding_id')
+            ThreatFinding.objects.filter(id=finding_id, organization=agent.organization, agent=agent).update(status=ThreatFinding.Status.ACK)
+            messages.success(request, 'Finding marcado como revisado.')
         return redirect('agents:detail', agent_id=agent.id)
 
     def get(self, request, agent_id):
@@ -851,7 +867,7 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         time_range = request.GET.get('time_range', '1h')
         minutes = {'15m': 15, '1h': 60, '24h': 1440}.get(time_range, 60)
         since = timezone.now() - timedelta(minutes=minutes)
-        apps = DetectedApp.objects.filter(agent=agent).order_by('-last_seen')[:100]
+        apps = DetectedApp.objects.filter(agent=agent).order_by('-created_at')[:100]
         metrics = MetricPoint.objects.filter(agent=agent, ts__gte=since, name__in=['cpu.percent', 'mem.percent', 'disk.root.used_percent', 'net.bytes_recv', 'net.bytes_sent']).order_by('ts')
         labels, cpu_values, mem_values, disk_values, net_in, net_out = [], [], [], [], [], []
         grouped = {}
@@ -866,13 +882,22 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             net_in.append(grouped[ts_key].get('net.bytes_recv', 0))
             net_out.append(grouped[ts_key].get('net.bytes_sent', 0))
         logs = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
-        incidents = Incident.objects.filter(agent=agent).order_by('-last_seen')[:100]
+        incidents = Incident.objects.filter(agent=agent).order_by('-created_at')[:100]
         latest_process_ts = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
         processes = ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu', '-mem')[:50] if latest_process_ts else []
         last_metrics_at = MetricPoint.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
         last_logs_at = LogEntry.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
-        latest_run = NocturnalScanRun.objects.filter(agent=agent).order_by('-started_at').first()
-        vt_available = bool(os.environ.get('VT_API_KEY'))
+        latest_run = AgentCommand.objects.filter(agent=agent, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first()
+        recent_findings = ThreatFinding.objects.filter(agent=agent).order_by('-created_at')[:30]
+        cfg, _ = AgentConfig.objects.get_or_create(
+            organization=agent.organization,
+            agent=agent,
+            defaults={
+                'scan_paths': ['C:\\Users', 'C:\\ProgramData'] if 'win' in (agent.os or '').lower() else ['/home', '/var/www'],
+                'exclusions': ['venv', '.git', 'node_modules', 'Windows\\WinSxS'],
+            },
+        )
+        vt_available = bool(cfg.vt_api_key_masked)
         return render(request, 'agents/detail.html', {
             'agent': agent,
             'agent_tabs': ['metrics', 'apps', 'processes', 'logs', 'alerts', 'threats'],
@@ -892,6 +917,8 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             'last_processes_at': latest_process_ts,
             'last_logs_at': last_logs_at,
             'latest_nocturnal_run': latest_run,
+            'recent_findings': recent_findings,
+            'agent_config': cfg,
             'vt_available': vt_available,
             'no_data_message': 'Waiting for agent telemetry',
         })
@@ -929,26 +956,26 @@ class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
                 mem_values.append(grouped[ts_key].get('mem.percent', 0))
             context.update({'labels': labels, 'cpu_values': cpu_values, 'mem_values': mem_values})
         elif tab == 'apps':
-            context['apps'] = DetectedApp.objects.filter(agent=agent).order_by('-last_seen')[:100]
+            context['apps'] = DetectedApp.objects.filter(agent=agent).order_by('-created_at')[:100]
         elif tab == 'processes':
             latest = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
             context['processes'] = ProcessSample.objects.filter(agent=agent, ts=latest).order_by('-cpu','-mem')[:100] if latest else []
         elif tab == 'logs':
             context['logs'] = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
         elif tab == 'alerts':
-            context['incidents'] = Incident.objects.filter(agent=agent).order_by('-last_seen')[:120]
+            context['incidents'] = Incident.objects.filter(agent=agent).order_by('-created_at')[:120]
         elif tab == 'threats':
-            context['findings'] = SecurityFinding.objects.filter(agent=agent).order_by('-last_seen')[:120]
-            context['vt_available'] = bool(os.environ.get('VT_API_KEY'))
+            context['findings'] = ThreatFinding.objects.filter(agent=agent).order_by('-created_at')[:120]
+            context['vt_available'] = bool(getattr(getattr(agent, 'config', None), 'vt_api_key_masked', ''))
         return render(request, template, context)
 class ThreatsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
     require_organization = True
 
     def get(self, request):
-        findings = SecurityFinding.objects.filter(organization=request.user.organization)
-        high_critical = findings.filter(severity__in=[SecurityFinding.Severity.HIGH, SecurityFinding.Severity.CRITICAL], status=SecurityFinding.Status.OPEN).count()
-        recent = findings.select_related('agent').order_by('-last_seen')[:50]
+        findings = ThreatFinding.objects.filter(organization=request.user.organization)
+        high_critical = findings.filter(severity__in=[ThreatFinding.Severity.HIGH, ThreatFinding.Severity.CRIT], status=ThreatFinding.Status.OPEN).count()
+        recent = findings.select_related('agent').order_by('-created_at')[:50]
         by_agent = findings.values('agent__name').annotate(total=Count('id')).order_by('-total')[:10]
         return render(request, 'agents/threats_overview.html', {'high_critical': high_critical, 'recent_findings': recent, 'by_agent': by_agent})
 
@@ -961,7 +988,7 @@ class AgentThreatsView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
         severity = request.GET.get('severity', '')
         status_filter = request.GET.get('status', '')
-        findings = SecurityFinding.objects.filter(agent=agent)
+        findings = ThreatFinding.objects.filter(agent=agent)
         if severity:
             findings = findings.filter(severity=severity)
         if status_filter:

@@ -6,7 +6,7 @@
 </div>
 <div class="card p-3">
   <table class="table table-sm"><thead><tr><th>Severity</th><th>Category</th><th>Title</th><th>Status</th><th>Last seen</th></tr></thead><tbody>
-    {% for finding in findings %}<tr><td>{{ finding.severity }}</td><td>{{ finding.category }}</td><td>{{ finding.title }}</td><td>{{ finding.status }}</td><td>{{ finding.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings</td></tr>{% endfor %}
+    {% for finding in findings %}<tr><td>{{ finding.severity }}</td><td>{{ finding.yara_rule }}</td><td>{{ finding.file_path }}</td><td>{{ finding.status }}</td><td>{{ finding.created_at|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings</td></tr>{% endfor %}
   </tbody></table>
 </div>
 {% endblock %}
