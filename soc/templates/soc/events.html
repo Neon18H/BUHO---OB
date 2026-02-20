@@ -1,6 +1,20 @@
-{% extends 'ui/base_noc.html' %}
+{% extends 'ui/base_console.html' %}
 {% block breadcrumbs %}SOC / Events{% endblock %}
 {% block content %}
-<div class="card buho-card mb-3"><div class="card-body"><form class="row g-2"><div class="col-md-2"><select name="time_range" class="form-select"><option value="1h">1h</option><option value="24h" selected>24h</option><option value="7d">7d</option></select></div><div class="col-md-2"><select name="severity" class="form-select"><option value="">All severities</option><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select></div><div class="col-md-3"><input name="target" value="{{ target }}" class="form-control" placeholder="agent/server"></div><div class="col-md-3"><input name="q" value="{{ q }}" class="form-control" placeholder="contains"></div><div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div></form></div></div>
-<div class="card buho-card">{% if events %}<table class="table table-sm mb-0" data-datatable="true"><thead><tr><th>TS</th><th>Severity</th><th>Type</th><th>Agent</th><th>Message</th></tr></thead><tbody>{% for e in events %}<tr><td>{{ e.ts }}</td><td><span class="badge badge-sev-{{ e.severity }}">{{ e.severity }}</span></td><td>{{ e.event_type }}</td><td>{{ e.agent.hostname|default:'-' }}</td><td>{{ e.message }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state m-3">Waiting for telemetry… no events yet.</div>{% endif %}</div>
+<div class="card buho-card mb-3"><div class="card-body">
+<form class="row g-2">
+  <div class="col-md-2"><input name="last_hours" value="{{ last_hours }}" class="form-control" type="number" min="1"></div>
+  <div class="col-md-2"><select name="severity" class="form-select"><option value="">All severities</option><option {% if severity == 'LOW' %}selected{% endif %}>LOW</option><option {% if severity == 'MEDIUM' %}selected{% endif %}>MEDIUM</option><option {% if severity == 'HIGH' %}selected{% endif %}>HIGH</option><option {% if severity == 'CRITICAL' %}selected{% endif %}>CRITICAL</option></select></div>
+  <div class="col-md-2"><input name="agent_id" value="{{ agent_id }}" class="form-control" placeholder="agent_id"></div>
+  <div class="col-md-2"><input name="server_id" value="{{ server_id }}" class="form-control" placeholder="server_id"></div>
+  <div class="col-md-3"><input name="contains" value="{{ contains }}" class="form-control" placeholder="contains"></div>
+  <div class="col-md-1"><button class="btn btn-primary w-100">Go</button></div>
+</form></div></div>
+<div class="card buho-card">
+{% if empty %}<div class="empty-state m-3"><i class="bi bi-database-exclamation me-1"></i>No hay eventos todavía.</div>
+{% else %}
+<table class="table table-dark table-hover mb-0"><thead><tr><th>TS</th><th>Severity</th><th>Type</th><th>Agent</th><th>Message</th></tr></thead><tbody>{% for e in events %}<tr><td>{{ e.ts }}</td><td><span class="badge badge-sev-{{ e.severity }}">{{ e.severity }}</span></td><td>{{ e.event_type }}</td><td>{{ e.agent.hostname|default:'-' }}</td><td>{{ e.message }}</td></tr>{% endfor %}</tbody></table>
+<div class="card-footer d-flex justify-content-between"><span>Página {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span><div>{% if page_obj.has_previous %}<a class="btn btn-sm btn-outline-light" href="?page={{ page_obj.previous_page_number }}&severity={{ severity }}&contains={{ contains }}&agent_id={{ agent_id }}&server_id={{ server_id }}&last_hours={{ last_hours }}">Prev</a>{% endif %} {% if page_obj.has_next %}<a class="btn btn-sm btn-outline-light" href="?page={{ page_obj.next_page_number }}&severity={{ severity }}&contains={{ contains }}&agent_id={{ agent_id }}&server_id={{ server_id }}&last_hours={{ last_hours }}">Next</a>{% endif %}</div></div>
+{% endif %}
+</div>
 {% endblock %}

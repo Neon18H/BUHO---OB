@@ -1,4 +1,4 @@
-{% extends 'ui/base_noc.html' %}
+{% extends 'ui/base_console.html' %}
 {% block breadcrumbs %}Agents / Overview{% endblock %}
 {% block content %}
 <div class="card buho-card mb-3"><div class="card-body"><form class="row g-2"><div class="col-md-3"><select name="provider" class="form-select"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div><div class="col-md-3"><select name="env" class="form-select"><option value="">Env</option>{% for key,label in envs %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div><div class="col-md-4"><input name="q" class="form-control" placeholder="Search"></div><div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div></form></div></div>

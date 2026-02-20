@@ -7,6 +7,13 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+class ErrorIDFilter(logging.Filter):
+    def filter(self, record):
+        if not hasattr(record, 'error_id'):
+            record.error_id = '-'
+        return True
+
+
 def env_bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -110,6 +117,9 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 20,
+            },
         }
     }
 
@@ -152,14 +162,18 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '%(asctime)s %(levelname)s %(name)s [%(process)d] %(message)s',
+            'format': '%(asctime)s %(levelname)s %(name)s [%(process)d] [error_id=%(error_id)s] %(message)s',
         },
+    },
+    'filters': {
+        'error_id': {'()': 'buho.settings.ErrorIDFilter'},
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
             'level': 'INFO',
+            'filters': ['error_id'],
         },
     },
     'loggers': {

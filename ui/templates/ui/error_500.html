@@ -1,9 +1,13 @@
-{% extends 'ui/base_noc.html' %}
-{% block title %}Unexpected error{% endblock %}
+{% extends 'ui/base_console.html' %}
+{% block title %}Error interno{% endblock %}
 {% block content %}
-<div class="console-card p-8 max-w-2xl mx-auto text-center">
-  <h1 class="text-2xl mb-2">Unexpected error</h1>
-  <p class="text-slate-300">An internal exception occurred. Please contact support with this Error ID.</p>
-  <p class="mt-4 text-cyan-300 font-mono">{{ error_id }}</p>
+<div class="card buho-card">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-exclamation-triangle display-4 text-warning"></i>
+    <h1 class="h3 mt-3">Algo salió mal</h1>
+    <p class="text-secondary">Se registró el stacktrace completo. Comparte este ID con soporte:</p>
+    <p><code>{{ error_id|default:'unknown' }}</code></p>
+    <a href="{% url 'ui:overview' %}" class="btn btn-primary">Volver al dashboard</a>
+  </div>
 </div>
 {% endblock %}
