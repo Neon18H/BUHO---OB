@@ -32,5 +32,13 @@ urlpatterns = [
     path('threats/overview/', ThreatsOverviewView.as_view(), name='threats_overview_legacy'),
     path('<int:agent_id>/threats/', AgentThreatsView.as_view(), name='agent_threats'),
     path('<int:agent_id>/tabs/<str:tab>/', AgentDetailTabView.as_view(), name='detail_tab'),
+
+    path('<int:agent_id>/metrics/', AgentDetailTabView.as_view(), {'tab': 'metrics'}, name='detail_metrics'),
+    path('<int:agent_id>/processes/', AgentDetailTabView.as_view(), {'tab': 'processes'}, name='detail_processes'),
+    path('<int:agent_id>/apps/', AgentDetailTabView.as_view(), {'tab': 'apps'}, name='detail_apps'),
+    path('<int:agent_id>/logs/', AgentDetailTabView.as_view(), {'tab': 'logs'}, name='detail_logs'),
+    path('<int:agent_id>/health/', AgentDetailTabView.as_view(), {'tab': 'health'}, name='detail_health'),
+    path('<int:agent_id>/night-ops/', AgentDetailTabView.as_view(), {'tab': 'night-ops'}, name='detail_night_ops'),
+
     path('<int:agent_id>/', AgentDetailView.as_view(), name='detail'),
 ]

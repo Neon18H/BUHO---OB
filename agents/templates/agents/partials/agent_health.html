@@ -1,0 +1,6 @@
+<div class="space-y-3">
+  <p class="text-sm text-slate-300">Health score: {{ agent.health_score|default:'N/A' }}</p>
+  <table class="w-full text-sm"><thead><tr><th class="text-left">Type</th><th class="text-left">Severity</th><th class="text-left">Status</th></tr></thead><tbody>
+    {% for i in incidents %}<tr><td>{{ i.type }}</td><td>{{ i.severity }}</td><td>{{ i.status }}</td></tr>{% empty %}<tr><td colspan="3">No health incidents.</td></tr>{% endfor %}
+  </tbody></table>
+</div>

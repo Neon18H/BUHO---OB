@@ -1,3 +1,4 @@
+from datetime import timedelta
 import secrets
 
 from django.db import connection
@@ -15,6 +16,7 @@ from agents.security import redact_payload, redact_text
 from agents.threats import ingest_artifacts, ingest_findings
 from audit.models import AuditLog
 from buho.runtime import get_db_label, get_public_base_url
+from soc.models import CorrelatedAlert, DetectionRule, SecurityEvent
 
 from .serializers import (
     AgentCommandAckSerializer,
@@ -208,20 +210,47 @@ class AgentLogsIngestApiView(APIView, AgentAuthMixin):
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             rows = []
+            sec_rows = []
             for item in serializer.validated_data['logs']:
+                message = redact_text(item.get('message', ''))
+                ts = item.get('ts') or timezone.now()
                 rows.append(
                     LogEntry(
                         organization=agent.organization,
                         agent=agent,
                         level=item.get('level', LogEntry.Level.INFO),
                         source=item.get('source', 'agent'),
-                        message=redact_text(item.get('message', '')),
-                        ts=item.get('ts') or timezone.now(),
+                        message=message,
+                        ts=ts,
                         fields_json=redact_payload(item.get('fields') or {}),
                     )
                 )
+                message_low = message.lower()
+                event_type = None
+                severity = 'LOW'
+                if 'failed password' in message_low or 'authentication failure' in message_low:
+                    event_type, severity = 'auth_failure', 'MEDIUM'
+                elif 'suspicious' in message_low or 'powershell -enc' in message_low:
+                    event_type, severity = 'suspicious_cmdline', 'HIGH'
+                elif 'yara' in message_low or 'malware' in message_low:
+                    event_type, severity = 'yara_match', 'CRITICAL'
+                if event_type:
+                    sec_rows.append(SecurityEvent(organization=agent.organization, agent=agent, ts=ts, source=item.get('source', 'agent'), event_type=event_type, severity=severity, title=event_type.replace('_', ' ').title(), message=message, raw_json=item, tags=[event_type]))
             LogEntry.objects.bulk_create(rows)
+            if sec_rows:
+                SecurityEvent.objects.bulk_create(sec_rows)
         evaluate_log_incidents(agent.organization, agent)
+        now = timezone.now()
+        for rule in DetectionRule.objects.filter(organization=agent.organization, enabled=True):
+            contains = (rule.query_json or {}).get('contains', '').lower()
+            if not contains:
+                continue
+            window_start = now - timedelta(seconds=rule.window_seconds)
+            matched = SecurityEvent.objects.filter(organization=agent.organization, ts__gte=window_start, message__icontains=contains)
+            if matched.count() >= rule.threshold:
+                alert = CorrelatedAlert.objects.create(organization=agent.organization, severity=rule.severity, title=f'Rule matched: {rule.name}', description=f'Threshold {rule.threshold} reached for {contains}', status=CorrelatedAlert.Status.OPEN)
+                alert.linked_events.add(*matched[:50])
+
         agent.last_seen = timezone.now()
         agent.status = Agent.Status.ONLINE
         health, _ = calculate_agent_health(agent)

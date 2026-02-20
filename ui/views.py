@@ -17,7 +17,7 @@ from django.views import View
 
 from accounts.forms import InitialRegistrationForm, OrganizationForm, OrganizationUserCreateForm, OrganizationUserUpdateForm
 from accounts.models import Organization
-from agents.models import Agent, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample, SecurityFinding
+from agents.models import Agent, AgentCommand, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample, SecurityFinding
 from audit.models import AuditLog
 from audit.utils import create_audit_log
 from dashboards.models import Dashboard, DashboardWidget
@@ -328,7 +328,7 @@ class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
         latest_metric = MetricPoint.objects.filter(agent=server).order_by('-ts').first()
         latest_log = LogEntry.objects.filter(agent=server).order_by('-ts').first()
         latest_process = ProcessSample.objects.filter(agent=server).order_by('-ts').first()
-        server_tabs = ['metrics', 'processes', 'apps', 'logs', 'health']
+        server_tabs = ['metrics', 'processes', 'apps', 'logs', 'health', 'night-ops']
         return render(
             request,
             'ui/server_detail.html',
@@ -343,6 +343,41 @@ class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
         )
 
 
+
+
+class ServerDetailTabView(RoleRequiredMixin, OrgScopedMixin, View):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+
+    def get(self, request, server_id, tab):
+        org = self.get_org(request)
+        if not org:
+            return redirect('auth_register')
+        server = get_object_or_404(Agent, pk=server_id, organization=org)
+        templates = {
+            'metrics': 'ui/partials/server_metrics.html',
+            'processes': 'ui/partials/server_processes.html',
+            'apps': 'ui/partials/server_apps.html',
+            'logs': 'ui/partials/server_logs.html',
+            'health': 'ui/partials/server_health.html',
+            'night-ops': 'ui/partials/server_night_ops.html',
+        }
+        template = templates.get(tab)
+        if not template:
+            return redirect('ui:server_detail', server_id=server.id)
+        context = {'server': server}
+        if tab == 'metrics':
+            context['metrics'] = MetricPoint.objects.filter(agent=server).order_by('-ts')[:120]
+        elif tab == 'processes':
+            latest = ProcessSample.objects.filter(agent=server).order_by('-ts').values_list('ts', flat=True).first()
+            context['processes'] = ProcessSample.objects.filter(agent=server, ts=latest).order_by('-cpu', '-mem')[:100] if latest else []
+        elif tab == 'apps':
+            context['apps'] = DetectedApp.objects.filter(agent=server).order_by('-last_seen')[:100]
+        elif tab == 'logs':
+            context['logs'] = LogEntry.objects.filter(agent=server).order_by('-ts')[:150]
+        elif tab == 'night-ops':
+            context['latest_nocturnal_run'] = AgentCommand.objects.filter(agent=server, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first()
+            context['recent_findings'] = SecurityFinding.objects.filter(agent=server).order_by('-last_seen')[:60]
+        return render(request, template, context)
 class AppsListView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 

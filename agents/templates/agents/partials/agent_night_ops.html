@@ -1,0 +1,14 @@
+<div class="space-y-3">
+  <form method="post" class="grid grid-cols-1 md:grid-cols-2 gap-3">{% csrf_token %}
+    <input type="hidden" name="action" value="run_night_scan" />
+    <div><label>Rutas</label><textarea name="paths" class="w-full bg-slate-900 border border-slate-700 rounded">{% for p in agent_config.scan_paths %}{{ p }}
+{% endfor %}</textarea></div>
+    <div><label>Exclusiones</label><textarea name="exclusions" class="w-full bg-slate-900 border border-slate-700 rounded">{% for p in agent_config.exclusions %}{{ p }}
+{% endfor %}</textarea></div>
+    <button class="px-3 py-2 rounded bg-cyan-700" type="submit">Iniciar Acción Nocturna</button>
+  </form>
+  <p class="text-sm">Estado: {{ latest_nocturnal_run.status|default:'PENDING' }}</p>
+  <table class="w-full text-sm"><thead><tr><th>Sev</th><th>Path</th><th>Status</th><th>Acciones</th></tr></thead><tbody>
+    {% for f in findings %}<tr><td>{{ f.severity }}</td><td>{{ f.file_path }}</td><td>{{ f.status }}</td><td class="flex gap-2"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="quarantine_file"><input type="hidden" name="file_path" value="{{ f.file_path }}"><button class="px-2 py-1 bg-slate-700 rounded">Cuarentena</button></form><form method="post">{% csrf_token %}<input type="hidden" name="action" value="ack_finding"><input type="hidden" name="finding_id" value="{{ f.id }}"><button class="px-2 py-1 bg-slate-700 rounded">Marcar revisado</button></form></td></tr>{% empty %}<tr><td colspan="4">Sin hallazgos.</td></tr>{% endfor %}
+  </tbody></table>
+</div>

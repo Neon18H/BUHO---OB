@@ -2,12 +2,11 @@
 {% block breadcrumbs %}Infrastructure / Servers / {{ server.hostname }}{% endblock %}
 {% block content %}
 <div x-data="{tab:'metrics'}" class="space-y-4">
-  <div class="glass p-4"><h1 class="text-xl">{{ server.hostname }}</h1><p class="text-slate-400">Server Health · uptime inferred by heartbeats · last heartbeat {{ server.last_seen|date:'Y-m-d H:i:s' }}</p></div>
-  <div class="flex gap-2">{% for t in server_tabs %}<button class="tab-btn" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'">{{ t|title }}</button>{% endfor %}</div>
-  {% if not latest_metric and not latest_log and not latest_process %}
-  <div class="glass p-4 text-slate-300">{{ no_data_message }}</div>
-  {% endif %}
-  <div class="glass p-4" x-show="tab==='health'">Provider {{ server.get_provider_display }} · OS {{ server.os }} · Version {{ server.version }}</div>
-  <div class="glass p-4" x-show="tab!=='health'">Data available in agent detail tabs.</div>
+  <div class="console-card p-4 flex justify-between">
+    <div><h1 class="text-xl">{{ server.hostname }}</h1><p class="text-slate-400 text-sm">Server Health · uptime inferred by heartbeats · last heartbeat {{ server.last_seen|date:'Y-m-d H:i:s' }}</p></div>
+    <div>{% if server.status == 'ONLINE' %}<span class="console-badge console-badge-ok">ONLINE</span>{% else %}<span class="console-badge console-badge-bad">OFFLINE</span>{% endif %}<span class="console-badge" style="background:#1e293b">{{ server.get_provider_display }}</span></div>
+  </div>
+  <div class="flex flex-wrap gap-2">{% for t in server_tabs %}<button class="console-tab" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'ui:server_detail_tab' server.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#server-tab'})">{{ t|title }}</button>{% endfor %}</div>
+  <div id="server-tab" class="console-card p-4" hx-get="{% url 'ui:server_detail_tab' server.id 'metrics' %}" hx-trigger="load"></div>
 </div>
 {% endblock %}

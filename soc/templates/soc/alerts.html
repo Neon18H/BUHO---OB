@@ -1,0 +1,5 @@
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}SOC / Alerts{% endblock %}
+{% block content %}
+<table class="w-full text-sm console-card p-2"><thead><tr><th>Created</th><th>Severity</th><th>Title</th><th>Status</th></tr></thead><tbody>{% for a in alerts %}<tr><td>{{ a.created_at }}</td><td>{{ a.severity }}</td><td>{{ a.title }}</td><td>{{ a.status }}</td></tr>{% empty %}<tr><td colspan="4">No correlated alerts.</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

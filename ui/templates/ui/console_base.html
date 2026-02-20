@@ -1,0 +1,50 @@
+{% load static %}
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}BUHO Console{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root { --bg:#0b1220; --panel:#111a2e; --border:#1f2a44; --accent:#22d3ee; }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:#e2e8f0; }
+    .console-card{background:var(--panel); border:1px solid var(--border); border-radius:.75rem;}
+    .console-badge{display:inline-flex; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; font-weight:600}
+    .console-badge-ok{background:#0e7490;color:#cffafe}.console-badge-bad{background:#7f1d1d;color:#fee2e2}
+    .console-tab{padding:.45rem .8rem; border:1px solid var(--border); border-radius:.5rem; font-size:.875rem}
+    .console-tab.active{background:#0f766e; color:white; border-color:#0f766e}
+  </style>
+</head>
+<body class="h-full" x-data="{open:true}">
+<div class="min-h-full flex">
+  <aside class="console-card m-3 p-4 w-72" :class="open ? 'block' : 'hidden md:block md:w-20'">
+    <div class="flex items-center justify-between mb-4"><div><p class="font-bold">BUHO</p><p class="text-xs text-slate-400">Security Console</p></div><button @click="open=!open">☰</button></div>
+    <nav class="space-y-2 text-sm">
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:overview' %}">Dashboard</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:servers' %}">Servers</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:overview' %}">Agents</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:apps' %}">Apps</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:logs' %}">Logs</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:alerts' %}">Alerts</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:threats_overview' %}">Threats (Night Ops)</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'soc:overview' %}">SOC/SIEM</a>
+      {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}<a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:settings' %}">Settings</a>{% endif %}
+    </nav>
+  </aside>
+  <main class="flex-1 p-3">
+    <header class="console-card p-3 mb-4 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2"><input class="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm w-64" placeholder="Global search"></div>
+      <div class="text-sm flex gap-3 items-center">{% if active_org %}<span class="console-badge" style="background:#0e2a35;color:#67e8f9">{{ active_org.name }}</span>{% endif %}<span>{{ request.user.username }}</span><form method="POST" action="{% url 'logout' %}">{% csrf_token %}<button class="px-3 py-1 rounded bg-rose-700">Logout</button></form></div>
+    </header>
+    <div class="text-xs text-slate-400 mb-3">{% block breadcrumbs %}Home{% endblock %}</div>
+    {% if messages %}<div class="space-y-2 mb-3">{% for message in messages %}<div class="console-card p-2 text-sm">{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

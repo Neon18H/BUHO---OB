@@ -1,0 +1,1 @@
+<table class="w-full text-sm"><thead><tr><th>TS</th><th>Level</th><th>Message</th></tr></thead><tbody>{% for l in logs %}<tr><td>{{ l.ts }}</td><td>{{ l.level }}</td><td>{{ l.message }}</td></tr>{% empty %}<tr><td colspan="3">No logs ingested.</td></tr>{% endfor %}</tbody></table>

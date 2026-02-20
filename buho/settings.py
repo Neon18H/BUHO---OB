@@ -32,6 +32,11 @@ if not allowed_hosts:
 ALLOWED_HOSTS = allowed_hosts
 
 CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '').strip()
+if railway_domain:
+    origin = f'https://{railway_domain}'
+    if origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(origin)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 if not DEBUG:
@@ -56,6 +61,7 @@ INSTALLED_APPS = [
     'dashboards',
     'rest_framework',
     'api',
+    'soc',
 ]
 
 MIDDLEWARE = [
