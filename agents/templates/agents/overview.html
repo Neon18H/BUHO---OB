@@ -1,32 +1,7 @@
 {% extends 'ui/base_noc.html' %}
 {% block breadcrumbs %}Agents / Overview{% endblock %}
 {% block content %}
-<div class="glass p-4 mb-4">
-  <h1 class="text-xl mb-3">Agents Overview</h1>
-  <form class="grid md:grid-cols-4 gap-3">
-    <select name="provider" class="bg-slate-900 border border-slate-700 rounded px-2 py-2"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
-    <select name="env" class="bg-slate-900 border border-slate-700 rounded px-2 py-2"><option value="">OS / Env</option>{% for key,label in envs %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
-    <input name="q" placeholder="Search" class="bg-slate-900 border border-slate-700 rounded px-2 py-2">
-    <button class="btn-noc btn-primary-noc">Filter</button>
-  </form>
-</div>
-<div class="glass p-4 mb-4">
-<table class="table-noc"><thead><tr><th>Hostname</th><th>Provider</th><th>OS</th><th>Last Seen</th><th>Status</th><th>Version</th><th>Actions</th></tr></thead><tbody>
-{% for agent in agents %}<tr><td>{{ agent.hostname }}</td><td>{{ agent.get_provider_display }}</td><td>{{ agent.os }}</td><td>{{ agent.last_seen|date:'Y-m-d H:i:s' }}</td><td><span class="badge-noc {% if agent.status == 'ONLINE' %}badge-online{% else %}badge-offline{% endif %}">{{ agent.status }}</span></td><td>{{ agent.version }}</td><td class="space-x-2"><a href="{% url 'agents:detail' agent.id %}">View</a><a href="{% url 'agents:install' %}">Install</a><a href="{% url 'agents:tokens' %}">Generate Token</a></td></tr>{% empty %}<tr><td colspan="7">Waiting for agent telemetry</td></tr>{% endfor %}
-</tbody></table>
-</div>
-<div class="glass p-4">
-  <div class="flex items-center justify-between mb-3">
-    <h2 class="text-lg">Windows Troubleshooting</h2>
-    <button type="button" class="btn-noc" onclick="document.getElementById('local-log-help').classList.toggle('hidden')">View local logs instructions</button>
-  </div>
-  <div id="local-log-help" class="hidden space-y-2 text-sm text-slate-300">
-    <p><strong>Task status</strong></p>
-    <pre class="bg-slate-900 border border-slate-700 rounded p-2">schtasks /Query /TN "BuhoAgent" /V /FO LIST</pre>
-    <p><strong>Agent logs</strong></p>
-    <pre class="bg-slate-900 border border-slate-700 rounded p-2">Get-Content "C:\ProgramData\BuhoAgent\buho-agent.log" -Tail 200 -Wait</pre>
-    <p><strong>Manual repair</strong></p>
-    <pre class="bg-slate-900 border border-slate-700 rounded p-2">& "C:\ProgramData\BuhoAgent\venv\Scripts\python.exe" "C:\ProgramData\BuhoAgent\agent.py" --run --config "C:\ProgramData\BuhoAgent\config.json"</pre>
-  </div>
-</div>
+<div class="card buho-card mb-3"><div class="card-body"><form class="row g-2"><div class="col-md-3"><select name="provider" class="form-select"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div><div class="col-md-3"><select name="env" class="form-select"><option value="">Env</option>{% for key,label in envs %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div><div class="col-md-4"><input name="q" class="form-control" placeholder="Search"></div><div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div></form></div></div>
+<div class="card buho-card">{% if agents %}<table class="table mb-0" data-datatable="true"><thead><tr><th>Hostname</th><th>Provider</th><th>OS</th><th>Last Seen</th><th>Status</th><th>Version</th><th>Actions</th></tr></thead><tbody>{% for agent in agents %}<tr><td>{{ agent.hostname }}</td><td>{{ agent.get_provider_display }}</td><td>{{ agent.os }}</td><td>{{ agent.last_seen|date:'Y-m-d H:i:s' }}</td><td><span class="badge {% if agent.status == 'ONLINE' %}text-bg-success{% elif agent.status == 'DEGRADED' %}text-bg-warning{% else %}text-bg-danger{% endif %}">{{ agent.status }}</span></td><td>{{ agent.version }}</td><td><a class="btn btn-sm btn-outline-light" href="{% url 'agents:detail' agent.id %}">View</a></td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state m-3">Waiting for agent telemetry.</div>{% endif %}</div>
+<div class="card buho-card mt-3"><div class="card-body"><h6>Windows Troubleshooting</h6><p class="small text-secondary">View local logs instructions</p><pre>schtasks /Query /TN "BuhoAgent" /V /FO LIST</pre><pre>& "C:\ProgramData\BuhoAgent\venv\Scripts\python.exe" "C:\ProgramData\BuhoAgent\agent.py" --run --config "C:\ProgramData\BuhoAgent\config.json"</pre><pre class="mb-0">Get-Content "C:\ProgramData\BuhoAgent\buho-agent.log" -Tail 200 -Wait</pre></div></div>
 {% endblock %}

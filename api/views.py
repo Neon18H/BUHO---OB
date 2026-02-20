@@ -228,14 +228,24 @@ class AgentLogsIngestApiView(APIView, AgentAuthMixin):
                 message_low = message.lower()
                 event_type = None
                 severity = 'LOW'
+                tags = []
+                level = str(item.get('level', 'INFO')).upper()
+                if level == 'ERROR':
+                    severity = 'HIGH'
+                elif level == 'WARN':
+                    severity = 'MEDIUM'
                 if 'failed password' in message_low or 'authentication failure' in message_low:
                     event_type, severity = 'auth_failure', 'MEDIUM'
+                    tags.append('auth')
                 elif 'suspicious' in message_low or 'powershell -enc' in message_low:
                     event_type, severity = 'suspicious_cmdline', 'HIGH'
+                    tags.append('cmdline')
                 elif 'yara' in message_low or 'malware' in message_low:
                     event_type, severity = 'yara_match', 'CRITICAL'
+                    tags.append('malware')
                 if event_type:
-                    sec_rows.append(SecurityEvent(organization=agent.organization, agent=agent, ts=ts, source=item.get('source', 'agent'), event_type=event_type, severity=severity, title=event_type.replace('_', ' ').title(), message=message, raw_json=item, tags=[event_type]))
+                    sec_rows.append(SecurityEvent(organization=agent.organization, agent=agent, ts=ts, source=item.get('source', 'agent'), event_type=event_type, severity=severity, title=event_type.replace('_', ' ').title(), message=message, raw_json=item, tags=tags + [event_type]))
+                    CorrelatedAlert.objects.create(organization=agent.organization, severity=severity, title=f'Auto alert: {event_type.replace('_', ' ')}', description=message[:500], status=CorrelatedAlert.Status.OPEN)
             LogEntry.objects.bulk_create(rows)
             if sec_rows:
                 SecurityEvent.objects.bulk_create(sec_rows)

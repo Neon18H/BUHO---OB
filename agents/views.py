@@ -825,106 +825,56 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         if action == 'run_night_scan':
             paths = [p.strip() for p in (request.POST.get('paths') or '').splitlines() if p.strip()]
             exclusions = [p.strip() for p in (request.POST.get('exclusions') or '').splitlines() if p.strip()]
-            payload = {
-                'paths': paths,
-                'exclusions': exclusions,
-                'vt': request.POST.get('virustotal_enabled') == 'on',
-            }
-            AgentCommand.objects.create(
-                organization=agent.organization,
-                agent=agent,
-                command_type=AgentCommand.CommandType.NIGHT_SCAN,
-                payload_json=payload,
-                status=AgentCommand.Status.PENDING,
-                issued_by=request.user,
-            )
+            AgentCommand.objects.create(organization=agent.organization, agent=agent, command_type=AgentCommand.CommandType.NIGHT_SCAN, payload_json={'paths': paths, 'exclusions': exclusions, 'vt': request.POST.get('virustotal_enabled') == 'on'}, status=AgentCommand.Status.PENDING, issued_by=request.user)
             messages.success(request, 'Acción Nocturna enviada al agente.')
         elif action == 'quarantine_file':
-            AgentCommand.objects.create(
-                organization=agent.organization,
-                agent=agent,
-                command_type=AgentCommand.CommandType.QUARANTINE_FILE,
-                payload_json={
-                    'file_path': request.POST.get('file_path', ''),
-                    'method': 'move',
-                    'reason': request.POST.get('reason', 'manual action'),
-                },
-                status=AgentCommand.Status.PENDING,
-                issued_by=request.user,
-            )
+            AgentCommand.objects.create(organization=agent.organization, agent=agent, command_type=AgentCommand.CommandType.QUARANTINE_FILE, payload_json={'file_path': request.POST.get('file_path', ''), 'method': 'move', 'reason': request.POST.get('reason', 'manual action')}, status=AgentCommand.Status.PENDING, issued_by=request.user)
             messages.success(request, 'Comando de cuarentena enviado.')
         elif action == 'ack_finding':
-            finding_id = request.POST.get('finding_id')
-            ThreatFinding.objects.filter(id=finding_id, organization=agent.organization, agent=agent).update(status=ThreatFinding.Status.ACK)
+            ThreatFinding.objects.filter(id=request.POST.get('finding_id'), organization=agent.organization, agent=agent).update(status=ThreatFinding.Status.ACK)
             messages.success(request, 'Finding marcado como revisado.')
         return redirect('agents:detail', agent_id=agent.id)
 
-    def get(self, request, agent_id):
-        agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
-        try:
-            create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='Agent', target_id=str(agent.id))
-        except Exception as exc:
-            logger.warning('Audit log failed for agent detail user=%s agent=%s: %s', request.user.id, agent.id, exc)
-        time_range = request.GET.get('time_range', '1h')
-        minutes = {'15m': 15, '1h': 60, '24h': 1440}.get(time_range, 60)
-        since = timezone.now() - timedelta(minutes=minutes)
-        apps = DetectedApp.objects.filter(agent=agent).order_by('-created_at')[:100]
-        metrics = MetricPoint.objects.filter(agent=agent, ts__gte=since, name__in=['cpu.percent', 'mem.percent', 'disk.root.used_percent', 'net.bytes_recv', 'net.bytes_sent']).order_by('ts')
-        labels, cpu_values, mem_values, disk_values, net_in, net_out = [], [], [], [], [], []
+    def _metrics_payload(self, agent):
+        metric_names = ['cpu.percent', 'mem.percent', 'disk.root.used_percent', 'net.bytes_sent', 'net.bytes_recv', 'gpu.percent']
+        points = MetricPoint.objects.filter(agent=agent, name__in=metric_names).order_by('-ts')[:600]
         grouped = {}
-        for point in metrics:
+        for point in reversed(list(points)):
             key = point.ts.replace(second=0, microsecond=0)
             grouped.setdefault(key, {})[point.name] = point.value
-        for ts_key in sorted(grouped):
-            labels.append(ts_key.strftime('%H:%M'))
-            cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
-            mem_values.append(grouped[ts_key].get('mem.percent', 0))
-            disk_values.append(grouped[ts_key].get('disk.root.used_percent', 0))
-            net_in.append(grouped[ts_key].get('net.bytes_recv', 0))
-            net_out.append(grouped[ts_key].get('net.bytes_sent', 0))
-        logs = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
-        incidents = Incident.objects.filter(agent=agent).order_by('-created_at')[:100]
+        timestamps = list(grouped.keys())[-60:]
+        labels = [ts.strftime('%H:%M') for ts in timestamps]
+        series = {name: [grouped[ts].get(name, 0) for ts in timestamps] for name in metric_names}
+        latest = {name: MetricPoint.objects.filter(agent=agent, name=name).order_by('-ts').first() for name in metric_names}
+        return labels, series, latest
+
+    def get(self, request, agent_id):
+        agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
+        labels, series, latest = self._metrics_payload(agent)
         latest_process_ts = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
-        processes = ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu', '-mem')[:50] if latest_process_ts else []
-        last_metrics_at = MetricPoint.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
-        last_logs_at = LogEntry.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
-        latest_run = AgentCommand.objects.filter(agent=agent, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first()
-        recent_findings = ThreatFinding.objects.filter(agent=agent).order_by('-created_at')[:30]
-        cfg, _ = AgentConfig.objects.get_or_create(
-            organization=agent.organization,
-            agent=agent,
-            defaults={
-                'scan_paths': ['C:\\Users', 'C:\\ProgramData'] if 'win' in (agent.os or '').lower() else ['/home', '/var/www'],
-                'exclusions': ['venv', '.git', 'node_modules', 'Windows\\WinSxS'],
-            },
-        )
-        vt_available = bool(cfg.vt_api_key_masked)
+        cfg, _ = AgentConfig.objects.get_or_create(organization=agent.organization, agent=agent, defaults={'scan_paths': ['C:\\Users', 'C:\\ProgramData'] if 'win' in (agent.os or '').lower() else ['/home', '/var/www'], 'exclusions': ['venv', '.git', 'node_modules', 'Windows\\WinSxS']})
+        logs = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
         return render(request, 'agents/detail.html', {
             'agent': agent,
             'agent_tabs': ['metrics', 'processes', 'apps', 'logs', 'health', 'night-ops'],
-            'heartbeats': agent.heartbeats.all()[:20],
-            'apps': apps,
             'labels': labels,
-            'cpu_values': cpu_values,
-            'mem_values': mem_values,
-            'disk_values': disk_values,
-            'net_in': net_in,
-            'net_out': net_out,
+            'series': {'cpu': series.get('cpu.percent', []), 'ram': series.get('mem.percent', []), 'disk': series.get('disk.root.used_percent', []), 'net_out': series.get('net.bytes_sent', []), 'net_in': series.get('net.bytes_recv', []), 'gpu': series.get('gpu.percent', [])},
+            'kpis': {
+                'cpu': latest['cpu.percent'].value if latest['cpu.percent'] else None,
+                'ram': latest['mem.percent'].value if latest['mem.percent'] else None,
+                'disk': latest['disk.root.used_percent'].value if latest['disk.root.used_percent'] else None,
+                'net': latest['net.bytes_sent'].value if latest['net.bytes_sent'] else None,
+                'gpu': latest['gpu.percent'].value if latest['gpu.percent'] else None,
+            },
+            'apps': DetectedApp.objects.filter(agent=agent).order_by('-created_at')[:100],
             'logs': logs,
-            'incidents': incidents,
-            'processes': processes,
-            'time_range': time_range,
-            'last_metrics_at': last_metrics_at,
-            'last_processes_at': latest_process_ts,
-            'last_logs_at': last_logs_at,
-            'latest_nocturnal_run': latest_run,
-            'recent_findings': recent_findings,
+            'incidents': Incident.objects.filter(agent=agent).order_by('-created_at')[:100],
+            'processes': ProcessSample.objects.filter(agent=agent, ts=latest_process_ts).order_by('-cpu', '-mem')[:20] if latest_process_ts else [],
+            'latest_nocturnal_run': AgentCommand.objects.filter(agent=agent, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first(),
+            'findings': ThreatFinding.objects.filter(agent=agent).order_by('-created_at')[:120],
             'agent_config': cfg,
-            'vt_available': vt_available,
-            'no_data_message': 'Waiting for agent telemetry',
+            'vt_available': bool(cfg.vt_api_key_masked),
         })
-
-
 
 
 class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
@@ -933,45 +883,8 @@ class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     missing_organization_redirect_url = 'auth_register'
 
     def get(self, request, agent_id, tab):
-        agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
-        tabs = {
-            'metrics': 'agents/partials/agent_metrics.html',
-            'apps': 'agents/partials/agent_apps.html',
-            'processes': 'agents/partials/agent_processes.html',
-            'logs': 'agents/partials/agent_logs.html',
-            'health': 'agents/partials/agent_health.html',
-            'night-ops': 'agents/partials/agent_night_ops.html',
-        }
-        template = tabs.get(tab)
-        if not template:
-            return HttpResponseBadRequest('Invalid tab')
-        context = {'agent': agent}
-        if tab == 'metrics':
-            metrics = MetricPoint.objects.filter(agent=agent, name__in=['cpu.percent','mem.percent','disk.root.used_percent','net.bytes_recv','net.bytes_sent']).order_by('ts')[:400]
-            grouped, labels, cpu_values, mem_values = {}, [], [], []
-            for point in metrics:
-                key = point.ts.replace(second=0, microsecond=0)
-                grouped.setdefault(key, {})[point.name] = point.value
-            for ts_key in sorted(grouped.keys()):
-                labels.append(ts_key.strftime('%H:%M'))
-                cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
-                mem_values.append(grouped[ts_key].get('mem.percent', 0))
-            context.update({'labels': labels, 'cpu_values': cpu_values, 'mem_values': mem_values})
-        elif tab == 'apps':
-            context['apps'] = DetectedApp.objects.filter(agent=agent).order_by('-created_at')[:100]
-        elif tab == 'processes':
-            latest = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
-            context['processes'] = ProcessSample.objects.filter(agent=agent, ts=latest).order_by('-cpu','-mem')[:100] if latest else []
-        elif tab == 'logs':
-            context['logs'] = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
-        elif tab == 'health':
-            context['incidents'] = Incident.objects.filter(agent=agent).order_by('-created_at')[:120]
-        elif tab == 'night-ops':
-            context['findings'] = ThreatFinding.objects.filter(agent=agent).order_by('-created_at')[:120]
-            context['latest_nocturnal_run'] = AgentCommand.objects.filter(agent=agent, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first()
-            context['agent_config'], _ = AgentConfig.objects.get_or_create(organization=agent.organization, agent=agent, defaults={'scan_paths': ['C:\\Users', 'C:\\ProgramData'] if 'win' in (agent.os or '').lower() else ['/home', '/var/www'], 'exclusions': ['venv', '.git', 'node_modules']})
-            context['vt_available'] = bool(getattr(getattr(agent, 'config', None), 'vt_api_key_masked', ''))
-        return render(request, template, context)
+        return redirect('agents:detail', agent_id=agent_id)
+
 class ThreatsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
     require_organization = True
