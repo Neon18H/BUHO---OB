@@ -41,6 +41,15 @@ class AgentDownloadScriptTests(TestCase):
         self.assertNotEqual(script[0], '\n')
         self.assertEqual(script[0], '#')
 
+    def test_generated_agent_logs_startup_identity_and_global_exception(self):
+        script = build_agent_py()
+
+        self.assertIn('def log_startup(cfg):', script)
+        self.assertIn('username=', script)
+        self.assertIn('is_system=', script)
+        self.assertIn('def install_global_excepthook(log_file):', script)
+        self.assertIn('unhandled exception', script)
+
     def test_download_endpoint_returns_valid_python(self):
         response = self.client.get(reverse('agents:download_agent_py'))
 
@@ -54,7 +63,7 @@ class AgentDownloadScriptTests(TestCase):
         self.assertIn('& $PyExe -m py_compile $AgentPyPath', script)
         self.assertIn('Write-ErrorStep "agent.py tiene error de sintaxis"', script)
         self.assertIn('Write-ErrorStep "Enroll falló. No se creó tarea programada."', script)
-        self.assertIn('[BuhoAgent] Instalación completa ✅', script)
+        self.assertIn('Write-RepairInstructions', script)
         self.assertIn('[System.IO.File]::WriteAllText($ConfigPath, $cfgJson, (New-Object System.Text.UTF8Encoding($false)))', script)
         config_validate_cmd = "& $PyExe -c \"import json; import pathlib; p=pathlib.Path(r'$ConfigPath'); json.loads(p.read_text(encoding='utf-8-sig')); print('config json OK')\""
         self.assertIn(config_validate_cmd, script)
@@ -73,17 +82,20 @@ class AgentDownloadScriptTests(TestCase):
         self.assertIn("'/SC', 'ONSTART'", script)
         self.assertIn("'/RU', 'SYSTEM'", script)
         self.assertIn("'/RL', 'HIGHEST'", script)
-        self.assertIn('& schtasks.exe /Run /TN "BuhoAgent"', script)
+        self.assertIn('$TaskCommand = \'cmd.exe /c "C:\\ProgramData\\BuhoAgent\\run-agent.cmd"\'', script)
         self.assertIn('$RunnerCmdPath = Join-Path $InstallRoot "run-agent.cmd"', script)
-        self.assertIn('$LogPathQuoted =', script)
-        self.assertIn('>> $LogPathQuoted 2>&1', script)
+        self.assertIn('chcp 65001 >nul', script)
+        self.assertIn('cd /d C:\\ProgramData\\BuhoAgent', script)
+        self.assertIn('>> "$LogPath" 2>&1', script)
         self.assertIn('goto loop', script)
         self.assertIn('Creando tarea programada BuhoAgent (SYSTEM/ONSTART)', script)
-        self.assertIn('[BuhoAgent] Tail de logs: Get-Content "C:\\ProgramData\\BuhoAgent\\buho-agent.log" -Tail 200 -Wait', script)
-        self.assertNotIn("'/SC', 'ONLOGON'", script)
-        self.assertNotIn("'/RU', $env:USERNAME", script)
+        self.assertIn('Start-ScheduledTask -TaskName "BuhoAgent"', script)
+        self.assertIn('Get-CimInstance Win32_Process', script)
+        self.assertIn('schtasks.exe /Query /TN "BuhoAgent" /V /FO LIST', script)
+        self.assertIn('install.log', script)
+        self.assertIn('run-manual.ps1', script)
         self.assertIn('No se pudo crear la tarea programada BuhoAgent.', script)
-        self.assertIn('Y luego ejecuta manualmente:', script)
+        self.assertNotIn("'/SC', 'ONLOGON'", script)
 
 
 class AgentInstallHintTests(TestCase):
@@ -110,3 +122,13 @@ class AgentInstallHintTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'cambia <code>127.0.0.1</code> por la IP/DNS del servidor Buho')
         self.assertContains(response, token.token)
+
+    def test_overview_has_windows_troubleshooting_block(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('agents:overview'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'View local logs instructions')
+        self.assertContains(response, 'schtasks /Query /TN "BuhoAgent" /V /FO LIST')
+        self.assertContains(response, 'run --config "C:\\ProgramData\\BuhoAgent\\config.json"')

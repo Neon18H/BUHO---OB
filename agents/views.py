@@ -27,6 +27,7 @@ def build_agent_py():
         """
         #!/usr/bin/env python3
         import argparse
+        import getpass
         import hashlib
         import json
         import os
@@ -34,7 +35,9 @@ def build_agent_py():
         import re
         import socket
         import subprocess
+        import sys
         import time
+        import traceback
         from collections import Counter, defaultdict
         from datetime import datetime, timezone
         from pathlib import Path
@@ -73,8 +76,37 @@ def build_agent_py():
             with open(log_file, "a", encoding="utf-8") as handle:
                 handle.write(f"{utc_now()} [{level}] {message}\\n")
                 if exc:
-                    import traceback
                     handle.write(traceback.format_exc() + "\\n")
+
+        def get_runtime_identity():
+            username = os.environ.get("USERNAME") or os.environ.get("USER") or "unknown"
+            try:
+                username = getpass.getuser() or username
+            except Exception:
+                pass
+            is_system = username.lower() in {"system", "nt authority\\system"}
+            return username, is_system
+
+        def log_startup(cfg):
+            username, is_system = get_runtime_identity()
+            write_log(
+                cfg["log_file"],
+                "INFO",
+                "startup "
+                + f"agent_id={cfg.get('agent_id', 'pending')} "
+                + f"server_url={cfg.get('server_url')} "
+                + f"interval={cfg.get('heartbeat_interval')} "
+                + f"platform={platform.platform()} "
+                + f"username={username} "
+                + f"is_system={is_system}",
+            )
+
+        def install_global_excepthook(log_file):
+            def _hook(exc_type, exc, tb):
+                with open(log_file, "a", encoding="utf-8") as handle:
+                    handle.write(f"{utc_now()} [ERROR] unhandled exception: {exc}\\n")
+                    handle.write("".join(traceback.format_exception(exc_type, exc, tb)) + "\\n")
+            sys.excepthook = _hook
 
         def post_json(url, payload, headers=None, timeout=(3, 5)):
             headers = headers or {}
@@ -402,12 +434,14 @@ def build_agent_py():
             cfg.setdefault("http_logs", [])
             cfg.setdefault("command_poll_interval", 12)
             cfg.setdefault("nocturnal", {"active": False})
+            install_global_excepthook(cfg["log_file"])
             headers = {"X-Buho-Agent-Id": str(cfg["agent_id"]), "X-Buho-Agent-Key": cfg["agent_key"]}
             state_path = str(Path(config_path).with_name("state.json"))
             state = load_json(state_path, {})
             last = defaultdict(float)
             sent_logs_minute = 0
             minute_bucket = int(time.time() // 60)
+            log_startup(cfg)
             write_log(cfg["log_file"], "INFO", "agent loop started")
             while True:
                 try:
@@ -475,6 +509,7 @@ def build_agent_py():
             parser.add_argument("--run", action="store_true")
             parser.add_argument("--once", action="store_true")
             args = parser.parse_args()
+            install_global_excepthook("C:/ProgramData/BuhoAgent/buho-agent.log")
             if args.enroll:
                 enroll(args.config)
                 return
@@ -495,19 +530,46 @@ def build_agent_py():
 
 def build_windows_installer(server_url: str, token: str):
     return dedent(
-        f"""
+        fr"""
         $ErrorActionPreference = "Stop"
         $BuhoUrl = "{server_url}"
         $Token = "{token}"
-        $InstallRoot = "C:\\ProgramData\\BuhoAgent"
+        $InstallRoot = "C:\ProgramData\BuhoAgent"
         $ConfigPath = Join-Path $InstallRoot "config.json"
         $LogPath = Join-Path $InstallRoot "buho-agent.log"
+        $InstallLogPath = Join-Path $InstallRoot "install.log"
         $AgentPyPath = Join-Path $InstallRoot "agent.py"
         $ReqPath = Join-Path $InstallRoot "requirements.txt"
         $RunnerCmdPath = Join-Path $InstallRoot "run-agent.cmd"
+        $RepairScriptPath = Join-Path $InstallRoot "run-manual.ps1"
 
-        function Write-Step($message) {{ Write-Host "[BuhoAgent] $message" -ForegroundColor Cyan }}
-        function Write-ErrorStep($message) {{ Write-Host "[BuhoAgent] ERROR: $message" -ForegroundColor Red }}
+        function Write-InstallLog($message, $level = "INFO") {{
+            $line = "$(Get-Date -Format o) [$level] $message"
+            Add-Content -Path $InstallLogPath -Value $line -Encoding UTF8
+        }}
+
+        function Write-Step($message) {{
+            Write-InstallLog $message
+            Write-Host "[BuhoAgent] $message" -ForegroundColor Cyan
+        }}
+
+        function Write-ErrorStep($message) {{
+            Write-InstallLog $message "ERROR"
+            Write-Host "[BuhoAgent] ERROR: $message" -ForegroundColor Red
+        }}
+
+        function Write-RepairInstructions($cause = "") {{
+            $manualCmd = '& "' + $PyExe + '" "' + $AgentPyPath + '" --run --config "' + $ConfigPath + '"'
+            $manualCmdWithLog = $manualCmd + ' >> "' + $LogPath + '" 2>&1'
+            if ($cause) {{
+                Write-ErrorStep "Causa probable: $cause"
+            }}
+            Write-Step "Comando manual de reparación:"
+            Write-Host $manualCmd -ForegroundColor Yellow
+            Write-Step "Comando manual con logs (recomendado):"
+            Write-Host $manualCmdWithLog -ForegroundColor Yellow
+            Write-Step "Script de reparación: $RepairScriptPath"
+        }}
 
         if ($PSVersionTable.PSVersion.Major -lt 5) {{ Write-Host "PowerShell 5+ requerido." -ForegroundColor Red; exit 1 }}
         if (-not (Get-Command python -ErrorAction SilentlyContinue)) {{
@@ -516,85 +578,149 @@ def build_windows_installer(server_url: str, token: str):
         }}
 
         New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+        New-Item -ItemType File -Path $InstallLogPath -Force | Out-Null
+        Write-Step "Inicio de instalación"
         Write-Step "Descargando agent.py y requirements.txt"
         Invoke-WebRequest -Uri "$BuhoUrl/agents/download/agent.py" -OutFile $AgentPyPath
         Invoke-WebRequest -Uri "$BuhoUrl/agents/download/requirements.txt" -OutFile $ReqPath
 
-        $config = @{{
+        $cfg = [ordered]@{{
             server_url = $BuhoUrl
             token = $Token
             heartbeat_interval = 15
-            metrics_interval = 10
+            metrics_interval = 15
             processes_interval = 30
+            logs_interval = 15
+            discovery_interval = 300
+            command_poll_interval = 12
             log_file = $LogPath
+            spool_file = (Join-Path $InstallRoot "spool.jsonl")
+            logs_sources = @(@{{ type = "file"; path = $LogPath; name = "agent" }})
+            http_logs = @("C:\inetpub\logs\LogFiles\W3SVC1\u_ex*.log")
+            tags = @("windows")
+            nocturnal = @{{ active = $false; paths = @("C:\Windows\Temp") }}
         }}
-        $cfgJson = ($config | ConvertTo-Json -Depth 6)
+        $cfgJson = $cfg | ConvertTo-Json -Depth 6
         [System.IO.File]::WriteAllText($ConfigPath, $cfgJson, (New-Object System.Text.UTF8Encoding($false)))
 
-        Write-Step "Creando entorno virtual"
-        python -m venv (Join-Path $InstallRoot "venv")
-        $PyExe = Join-Path $InstallRoot "venv\\Scripts\\python.exe"
+        $PyExe = (Get-Command python).Source
+        Write-Step "Python detectado en $PyExe"
+        Write-Step "Creando virtualenv"
+        & $PyExe -m venv (Join-Path $InstallRoot "venv")
+        $PyExe = Join-Path $InstallRoot "venv\Scripts\python.exe"
 
-        Write-Step "Validando config.json"
-        & $PyExe -c "import json; import pathlib; p=pathlib.Path(r'$ConfigPath'); json.loads(p.read_text(encoding='utf-8-sig')); print('config json OK')"
+        Write-Step "Validando JSON de config"
+        $configCheck = & $PyExe -c "import json; import pathlib; p=pathlib.Path(r'$ConfigPath'); json.loads(p.read_text(encoding='utf-8-sig')); print('config json OK')" 2>&1
+        $configCheck | ForEach-Object {{ Write-InstallLog $_ }}
         if ($LASTEXITCODE -ne 0) {{
             Write-ErrorStep "config.json inválido. Abortando instalación."
             exit 1
         }}
 
-        & $PyExe -m pip install --disable-pip-version-check -r $ReqPath
+        Write-Step "Instalando dependencias"
+        & $PyExe -m pip install --disable-pip-version-check -r $ReqPath 2>&1 | Tee-Object -FilePath $InstallLogPath -Append | Out-Null
 
         Write-Step "Validando sintaxis de agent.py"
         $compileOutput = & $PyExe -m py_compile $AgentPyPath 2>&1
+        $compileOutput | ForEach-Object {{ Write-InstallLog $_ }}
         if ($LASTEXITCODE -ne 0) {{
             Write-ErrorStep "agent.py tiene error de sintaxis"
             $compileOutput | ForEach-Object {{ Write-Host $_ -ForegroundColor Red }}
             exit 1
         }}
 
-        Write-Step "Ejecutando enroll"
-        & $PyExe $AgentPyPath --enroll --config $ConfigPath
-        if ($LASTEXITCODE -ne 0) {{
-            Write-ErrorStep "Enroll falló. No se creó tarea programada."
-            exit 1
-        }}
-
-        $PyExeQuoted = '"' + $PyExe + '"'
-        $AgentPyPathQuoted = '"' + $AgentPyPath + '"'
-        $ConfigPathQuoted = '"' + $ConfigPath + '"'
-        $LogPathQuoted = '"' + $LogPath + '"'
+        Write-Step "Creando script run-agent.cmd con logging"
         $RunnerScript = @"
 @echo off
+chcp 65001 >nul
+cd /d C:\ProgramData\BuhoAgent
 :loop
-$PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted >> $LogPathQuoted 2>&1
+"$PyExe" "$AgentPyPath" --run --config "$ConfigPath" >> "$LogPath" 2>&1
 timeout /t 5 /nobreak >nul
 goto loop
 "@
         [System.IO.File]::WriteAllText($RunnerCmdPath, $RunnerScript, (New-Object System.Text.UTF8Encoding($false)))
-        $TaskCommand = '"' + $RunnerCmdPath + '"'
+
+        Write-Step "Creando run-manual.ps1"
+        $RepairScript = @"
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Set-Location "C:\ProgramData\BuhoAgent"
+& "$PyExe" "$AgentPyPath" --run --config "$ConfigPath" >> "$LogPath" 2>&1
+"@
+        [System.IO.File]::WriteAllText($RepairScriptPath, $RepairScript, (New-Object System.Text.UTF8Encoding($false)))
+
+        Write-Step "Ejecutando enroll"
+        & $PyExe $AgentPyPath --enroll --config $ConfigPath 2>&1 | Tee-Object -FilePath $InstallLogPath -Append | Out-Null
+        if ($LASTEXITCODE -ne 0) {{
+            Write-ErrorStep "Enroll falló. No se creó tarea programada."
+            Write-RepairInstructions "token inválido, URL inaccesible o bloqueo de red durante enroll"
+            exit 1
+        }}
+
+        $TaskCommand = 'cmd.exe /c "C:\ProgramData\BuhoAgent\run-agent.cmd"'
         $createArgs = @('/Create', '/TN', 'BuhoAgent', '/SC', 'ONSTART', '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F', '/TR', $TaskCommand)
         Write-Step "Creando tarea programada BuhoAgent (SYSTEM/ONSTART)"
-
-        & schtasks.exe @createArgs
+        & schtasks.exe @createArgs 2>&1 | Tee-Object -FilePath $InstallLogPath -Append | Out-Null
         if ($LASTEXITCODE -ne 0) {{
             Write-ErrorStep "No se pudo crear la tarea programada BuhoAgent."
             Write-Host "Ejecuta manualmente:" -ForegroundColor Yellow
             Write-Host 'schtasks /Create /TN "BuhoAgent" /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F /TR "' + $TaskCommand + '"' -ForegroundColor Yellow
-            Write-Host "Y luego ejecuta manualmente: $PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted" -ForegroundColor Yellow
+            Write-RepairInstructions "error al registrar la tarea programada"
             exit 1
         }}
 
-        & schtasks.exe /Run /TN "BuhoAgent"
-        if ($LASTEXITCODE -ne 0) {{
-            Write-ErrorStep "No se pudo ejecutar la tarea BuhoAgent."
-            Write-Host 'Ejecuta manualmente: schtasks /Run /TN "BuhoAgent"' -ForegroundColor Yellow
-            Write-Host "o directamente: $PyExeQuoted $AgentPyPathQuoted --run --config $ConfigPathQuoted" -ForegroundColor Yellow
+        $battery = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
+        if ($battery) {{
+            Write-Step "Dispositivo con batería detectado; deshabilitando stop-on-battery para robustez"
+        }}
+        try {{
+            $task = Get-ScheduledTask -TaskName "BuhoAgent" -ErrorAction Stop
+            $task.Settings.DisallowStartIfOnBatteries = $false
+            $task.Settings.StopIfGoingOnBatteries = $false
+            Set-ScheduledTask -TaskName "BuhoAgent" -Settings $task.Settings | Out-Null
+            Write-Step "Configuración de energía aplicada a la tarea"
+        }} catch {{
+            Write-InstallLog "No se pudo ajustar configuración de energía: $($_.Exception.Message)" "WARN"
+        }}
+
+        Write-Step "Ejecutando smoke test de tarea"
+        Start-ScheduledTask -TaskName "BuhoAgent" -ErrorAction SilentlyContinue | Out-Null
+        & schtasks.exe /Run /TN "BuhoAgent" 2>&1 | Tee-Object -FilePath $InstallLogPath -Append | Out-Null
+        Start-Sleep -Seconds 5
+
+        $taskDetails = & schtasks.exe /Query /TN "BuhoAgent" /V /FO LIST 2>&1
+        $taskDetails | Tee-Object -FilePath $InstallLogPath -Append | Out-Null
+        $taskState = ($taskDetails | Select-String -Pattern '^Status:\s*(.+)$' | Select-Object -First 1).Matches.Groups[1].Value
+        $taskLastResult = ($taskDetails | Select-String -Pattern '^Last Run Result:\s*(.+)$' | Select-Object -First 1).Matches.Groups[1].Value
+
+        $agentProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{
+            $_.Name -match '^python(\.exe)?$' -and $_.CommandLine -like '*C:\ProgramData\BuhoAgent\agent.py*'
+        }}
+        $hasProcess = ($agentProcesses | Measure-Object).Count -gt 0
+
+        $hasLog = Test-Path $LogPath
+        $logSize = if ($hasLog) {{ (Get-Item $LogPath).Length }} else {{ 0 }}
+        $hasLogData = $hasLog -and $logSize -gt 0
+
+        if (-not $hasProcess -or -not $hasLogData) {{
+            Write-ErrorStep "Smoke test falló. Estado tarea=$taskState último resultado=$taskLastResult"
+            if (-not $hasProcess) {{
+                Write-RepairInstructions "la tarea no inició python con agent.py (revisar credenciales SYSTEM, policy o antivirus)"
+            }} elseif (-not $hasLog) {{
+                Write-RepairInstructions "el archivo de log no fue creado (revisar permisos en C:\ProgramData\BuhoAgent)"
+            }} else {{
+                Write-RepairInstructions "el proceso inició pero no emitió salida aún; revisar conectividad/red y contenido de $LogPath"
+            }}
+            Write-Host '[BuhoAgent] Revisa install.log: C:\ProgramData\BuhoAgent\install.log' -ForegroundColor Yellow
             exit 1
         }}
 
+        Write-Step "Smoke test OK: proceso detectado y logs generados"
         Write-Host "[BuhoAgent] Instalación completa ✅" -ForegroundColor Green
-        Write-Host "[BuhoAgent] Logs: C:\\ProgramData\\BuhoAgent\\buho-agent.log" -ForegroundColor Green
-        Write-Host '[BuhoAgent] Tail de logs: Get-Content "C:\\ProgramData\\BuhoAgent\\buho-agent.log" -Tail 200 -Wait' -ForegroundColor Green
+        Write-Host "[BuhoAgent] Logs agente: C:\ProgramData\BuhoAgent\buho-agent.log" -ForegroundColor Green
+        Write-Host "[BuhoAgent] Logs instalador: C:\ProgramData\BuhoAgent\install.log" -ForegroundColor Green
+        Write-Host '[BuhoAgent] Tail de logs: Get-Content "C:\ProgramData\BuhoAgent\buho-agent.log" -Tail 200 -Wait' -ForegroundColor Green
         Write-Host "[BuhoAgent] Verifica ONLINE en: $BuhoUrl/agents/overview" -ForegroundColor Green
         """
     ).replace("\n        ", "\n").lstrip().rstrip() + "\n"
