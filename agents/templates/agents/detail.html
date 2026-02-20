@@ -1,84 +1,9 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}Agents / {{ agent.hostname }}{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div>
-    <h1 class="h3 mb-1">{{ agent.name }}</h1>
-    <div class="text-body-secondary">{{ agent.hostname }} · {{ agent.get_provider_display }} · {{ agent.get_environment_display }}</div>
-    <div class="small text-body-secondary mt-1">
-      Last metrics: {{ last_metrics_at|date:'Y-m-d H:i:s'|default:'-' }} ·
-      Last processes: {{ last_processes_at|date:'Y-m-d H:i:s'|default:'-' }} ·
-      Last logs: {{ last_logs_at|date:'Y-m-d H:i:s'|default:'-' }}
-    </div>
-  </div>
-  <div class="d-flex gap-2 align-items-center">
-    <a class="btn btn-outline-info" href="{% url 'agents:agent_threats' agent.id %}">Threats</a>
-    <form method="post" class="d-inline">{% csrf_token %}<input type="hidden" name="action" value="stop_nocturnal"><button class="btn btn-outline-danger btn-sm">Detener</button></form>
-    <button class="btn btn-sm" style="background:linear-gradient(90deg,#7c3aed,#06b6d4);color:white;box-shadow:0 0 16px rgba(6,182,212,.6)" data-bs-toggle="collapse" data-bs-target="#nocturnalConfig">🦉 Acción Nocturna</button>
-    <span class="badge text-bg-secondary">Health {{ agent.health_score }}/100</span>
-    <span class="badge text-bg-dark">{{ agent.status }}</span>
-  </div>
+<div x-data="{tab:'metrics'}" class="space-y-4">
+  <div class="glass p-4 flex justify-between items-center"><div><h1 class="text-xl">{{ agent.hostname }}</h1><p class="text-sm text-slate-400">{{ agent.get_provider_display }} · {{ agent.os }} · {{ agent.ip_address }}</p></div><a href="{% url 'agents:agent_threats' agent.id %}" class="btn-noc btn-danger-noc">Acción Nocturna</a></div>
+  <div class="flex flex-wrap gap-2">{% for t in 'metrics,apps,processes,logs,alerts,threats'.split(',') %}<button class="tab-btn" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'agents:detail_tab' agent.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#tab-content'})">{{ t|title }}</button>{% endfor %}</div>
+  <div id="tab-content" class="glass p-4" hx-get="{% url 'agents:detail_tab' agent.id 'metrics' %}" hx-trigger="load">Loading...</div>
 </div>
-
-<div class="collapse mb-3" id="nocturnalConfig">
-  <div class="card p-3">
-    <form method="post" class="row g-2">
-      {% csrf_token %}
-      <input type="hidden" name="action" value="start_nocturnal">
-      <div class="col-12"><label class="form-label">Paths (one per line)</label><textarea name="paths" class="form-control" rows="3">/tmp
-/var/tmp</textarea></div>
-      <div class="col-md-2"><label class="form-label">Max files</label><input type="number" class="form-control" name="max_files_per_cycle" value="200"></div>
-      <div class="col-md-2"><label class="form-label">Interval (s)</label><input type="number" class="form-control" name="interval_seconds" value="60"></div>
-      <div class="col-md-2"><label class="form-label">Max MB</label><input type="number" class="form-control" name="max_file_size_mb" value="20"></div>
-      <div class="col-md-2"><label class="form-label">VT threshold</label><input type="number" class="form-control" name="vt_threshold" value="3"></div>
-      <div class="col-md-2 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" name="yara_enabled" checked><label class="form-check-label">YARA</label></div></div>
-      <div class="col-md-2 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" name="virustotal_enabled" {% if not vt_available %}disabled{% else %}checked{% endif %}><label class="form-check-label">VirusTotal {% if not vt_available %}(No disponible){% endif %}</label></div></div>
-      <div class="col-12"><button class="btn btn-primary">Iniciar escaneo</button></div>
-    </form>
-  </div>
-</div>
-
-{% if latest_nocturnal_run %}
-<div class="card p-3 mb-3">
-  <h6>Nocturnal Scan Run</h6>
-  <div class="small text-body-secondary">Estado: {{ latest_nocturnal_run.status }} · Progreso: {{ latest_nocturnal_run.last_progress }}% · Mensaje: {{ latest_nocturnal_run.last_message|default:'-' }}</div>
-  <div class="small text-body-secondary">Iniciado: {{ latest_nocturnal_run.started_at|date:'Y-m-d H:i:s' }} · Finalizado: {{ latest_nocturnal_run.ended_at|date:'Y-m-d H:i:s'|default:'-' }}</div>
-</div>
-{% endif %}
-
-<ul class="nav nav-tabs mb-3" id="agentDetailTabs" role="tablist">
-  <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#metrics">Metrics</button></li>
-  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#apps">Apps</button></li>
-  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#logs">Logs</button></li>
-  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#alerts">Alerts</button></li>
-  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#processes">Processes</button></li>
-</ul>
-
-<div class="tab-content">
-  <div class="tab-pane fade show active" id="metrics">
-    <div class="card p-3"><h6>CPU/RAM/DISK</h6><canvas id="agentMetricsChart" height="100"></canvas></div>
-    <div class="card p-3 mt-3"><h6>Network</h6><canvas id="agentNetworkChart" height="80"></canvas></div>
-  </div>
-
-  <div class="tab-pane fade" id="apps">
-    <div class="card p-3"><table class="table table-sm"><thead><tr><th>Name</th><th>Runtime</th><th>Framework</th><th>Ports</th><th>Health</th></tr></thead><tbody>{% for app in apps %}<tr><td><a href="{% url 'ui:app_detail' app.id %}">{{ app.name }}</a></td><td>{{ app.runtime|default:'-' }}</td><td>{{ app.framework|default:'-' }}</td><td><code>{{ app.ports_json }}</code></td><td>{{ app.app_health_score }}</td></tr>{% empty %}<tr><td colspan="5">Sin apps detectadas.</td></tr>{% endfor %}</tbody></table></div>
-  </div>
-
-  <div class="tab-pane fade" id="logs">
-    <div class="card p-3"><table class="table table-sm"><thead><tr><th>TS</th><th>Lvl</th><th>Source</th><th>Message</th></tr></thead><tbody>{% for log in logs %}<tr><td>{{ log.ts|date:'Y-m-d H:i:s' }}</td><td>{{ log.level }}</td><td>{{ log.source }}</td><td>{{ log.message|truncatechars:160 }}</td></tr>{% empty %}<tr><td colspan="4">Sin logs.</td></tr>{% endfor %}</tbody></table></div>
-  </div>
-
-  <div class="tab-pane fade" id="alerts">
-    <div class="card p-3"><ul class="list-group list-group-flush">{% for incident in incidents %}<li class="list-group-item d-flex justify-content-between"><span>{{ incident.type }}</span><span>{{ incident.status }}</span></li>{% empty %}<li class="list-group-item">Sin alertas</li>{% endfor %}</ul></div>
-  </div>
-
-  <div class="tab-pane fade" id="processes">
-    <div class="card p-3"><table class="table table-sm"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>MEM</th><th>User</th></tr></thead><tbody>{% for row in processes %}<tr><td>{{ row.pid }}</td><td>{{ row.name }}</td><td>{{ row.cpu }}</td><td>{{ row.mem }}</td><td>{{ row.user|default:'-' }}</td></tr>{% empty %}<tr><td colspan="5">Sin procesos recientes.</td></tr>{% endfor %}</tbody></table></div>
-  </div>
-</div>
-{% endblock %}
-{% block scripts %}
-<script>
-new Chart(document.getElementById('agentMetricsChart'), {type:'line', data:{labels:{{ labels|safe }},datasets:[{label:'CPU %',data:{{ cpu_values|safe }},borderColor:'#4f46e5'},{label:'RAM %',data:{{ mem_values|safe }},borderColor:'#0ea5e9'},{label:'Disk %',data:{{ disk_values|safe }},borderColor:'#f59e0b'}]}});
-new Chart(document.getElementById('agentNetworkChart'), {type:'line', data:{labels:{{ labels|safe }},datasets:[{label:'Net In',data:{{ net_in|safe }},borderColor:'#22c55e'},{label:'Net Out',data:{{ net_out|safe }},borderColor:'#ef4444'}]}});
-</script>
 {% endblock %}

@@ -1,0 +1,6 @@
+<div class="glass p-4">
+  <h3 class="mb-3">Top Apps por error rate</h3>
+  <table class="table-noc"><thead><tr><th>App</th><th>Server</th><th>Provider</th><th>Errors</th></tr></thead><tbody>
+    {% for app in top_apps %}<tr><td><a href="{% url 'ui:app_detail' app.id %}">{{ app.name }}</a></td><td>{{ app.agent.hostname }}</td><td>{{ app.agent.get_provider_display }}</td><td class="metric">{{ app.error_count }}</td></tr>{% empty %}<tr><td colspan="4">No telemetry yet — Deploy an agent</td></tr>{% endfor %}
+  </tbody></table>
+</div>

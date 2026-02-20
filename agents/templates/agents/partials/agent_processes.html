@@ -1,0 +1,1 @@
+<table class="table-noc"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>RAM</th></tr></thead><tbody>{% for p in processes %}<tr><td>{{ p.pid }}</td><td>{{ p.name }}</td><td>{{ p.cpu }}</td><td>{{ p.mem }}</td></tr>{% empty %}<tr><td colspan="4">No processes.</td></tr>{% endfor %}</tbody></table>

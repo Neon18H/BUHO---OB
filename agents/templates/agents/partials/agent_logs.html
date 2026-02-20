@@ -1,0 +1,1 @@
+<table class="table-noc"><thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead><tbody>{% for log in logs %}<tr><td>{{ log.ts|date:'Y-m-d H:i:s' }}</td><td>{{ log.level }}</td><td>{{ log.message|truncatechars:120 }}</td></tr>{% empty %}<tr><td colspan="3">No logs.</td></tr>{% endfor %}</tbody></table>

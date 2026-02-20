@@ -125,9 +125,9 @@ if HAS_WHITENOISE:
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'accounts.User'
-LOGIN_URL = 'accounts:login'
+LOGIN_URL = '/auth/login/'
 LOGIN_REDIRECT_URL = 'ui:overview'
-LOGOUT_REDIRECT_URL = 'accounts:login'
+LOGOUT_REDIRECT_URL = '/auth/login/'
 
 ROLE_HIERARCHY = {
     'SUPERADMIN': 4,

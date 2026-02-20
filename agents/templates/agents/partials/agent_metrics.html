@@ -1,0 +1,2 @@
+<h3 class="mb-2">Metrics</h3><canvas id="agentMetrics"></canvas>
+<script>new Chart(document.getElementById('agentMetrics'),{type:'line',data:{labels:{{ labels|safe }},datasets:[{label:'CPU',data:{{ cpu_values|safe }},borderColor:'#60a5fa'},{label:'RAM',data:{{ mem_values|safe }},borderColor:'#34d399'}]}});</script>

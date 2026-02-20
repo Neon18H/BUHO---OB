@@ -1,0 +1,6 @@
+.noc-noise { position: relative; }
+.noc-noise::before { content: ""; position: absolute; inset: 0; opacity: .06; pointer-events:none; background-image: radial-gradient(circle, #fff 1px, transparent 1px); background-size: 4px 4px; }
+.htmx-indicator{ display:none; }
+.htmx-request .htmx-indicator{ display:inline-flex; }
+.skeleton{ height: 1rem; border-radius: .4rem; background: linear-gradient(90deg, rgba(148,163,184,.12), rgba(148,163,184,.25), rgba(148,163,184,.12)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+@keyframes shimmer { from{background-position:200% 0} to{background-position:-200% 0} }

@@ -1,27 +1,16 @@
-{% extends 'ui/base.html' %}
-{% load ui_tags %}
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}Infrastructure / Servers{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 mb-0">Agents</h1>
-</div>
-<div class="card table-card">
-  <div class="table-responsive sticky-table">
-    <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Name</th><th>Hostname</th><th>IP</th><th>OS</th><th>Status</th><th>Last seen</th><th></th></tr></thead>
-      <tbody>
-      {% for server in servers %}
-      <tr>
-        <td>{{ server.name }}</td>
-        <td>{{ server.hostname }}</td>
-        <td>{{ server.ip_address }}</td>
-        <td>{{ server.os }}</td>
-        <td><span class="badge text-bg-{{ server.status|badge_class }}">{{ server.status }}</span></td>
-        <td>{{ server.last_seen|date:'Y-m-d H:i:s' }}</td>
-        <td><a href="{% url 'ui:server_detail' server.id %}" class="btn btn-sm btn-outline-primary">View detail</a></td>
-      </tr>
-      {% empty %}<tr><td colspan="7" class="text-body-secondary">No agents enrolled yet.</td></tr>{% endfor %}
-      </tbody>
-    </table>
+<div class="glass p-4">
+  <h1 class="text-xl mb-4">Servers by provider</h1>
+  <div class="grid md:grid-cols-4 gap-3 mb-4">
+    <a href="?provider=AWS" class="glass p-3">AWS</a>
+    <a href="?provider=AZURE" class="glass p-3">Azure</a>
+    <a href="?provider=RAILWAY" class="glass p-3">Railway</a>
+    <a href="?provider=ON_PREM" class="glass p-3">On-Prem</a>
   </div>
+  <table class="table-noc"><thead><tr><th>Hostname</th><th>Provider</th><th>Region</th><th>Status</th><th>Last Seen</th><th></th></tr></thead><tbody>
+  {% for server in servers %}<tr><td>{{ server.hostname }}</td><td>{{ server.get_provider_display }}</td><td>{{ server.region|default:'-' }}</td><td><span class="badge-noc {% if server.status == 'ONLINE' %}badge-online{% else %}badge-offline{% endif %}">{{ server.status }}</span></td><td>{{ server.last_seen|date:'Y-m-d H:i' }}</td><td><a href="{% url 'ui:server_detail' server.id %}">View</a></td></tr>{% empty %}<tr><td colspan="6">No telemetry yet — Deploy an agent</td></tr>{% endfor %}
+  </tbody></table>
 </div>
 {% endblock %}

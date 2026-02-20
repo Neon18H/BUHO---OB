@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login as auth_login
 from django.contrib.auth.views import LoginView, LogoutView
-from django.db.models import Avg, Max, Q, Sum
+from django.db.models import Avg, Count, Max, Q, Sum
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -15,7 +15,7 @@ from django.views import View
 
 from accounts.forms import InitialRegistrationForm, OrganizationForm, OrganizationUserCreateForm, OrganizationUserUpdateForm
 from accounts.models import Organization
-from agents.models import Agent, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample
+from agents.models import Agent, DetectedApp, Incident, LogEntry, MetricPoint, ProcessSample, SecurityFinding
 from audit.models import AuditLog
 from audit.utils import create_audit_log
 from dashboards.models import Dashboard, DashboardWidget
@@ -52,6 +52,7 @@ class BuhoLoginView(LoginView):
 
 
 class BuhoLogoutView(LogoutView):
+    http_method_names = ['post', 'options']
     next_page = reverse_lazy('accounts:login')
 
     def dispatch(self, request, *args, **kwargs):
@@ -120,94 +121,162 @@ class OrganizationSwitchView(RoleRequiredMixin, View):
 class OverviewView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
+    def _filtered_scope(self, request, org):
+        provider = request.GET.get('provider', '')
+        server_id = request.GET.get('server', '')
+        app_id = request.GET.get('app', '')
+        time_range = request.GET.get('time_range', '24h')
+        minutes_map = {'15m': 15, '1h': 60, '24h': 1440, '7d': 10080}
+        window_minutes = minutes_map.get(time_range, 1440)
+        since = timezone.now() - timedelta(minutes=window_minutes)
+
+        agents = Agent.objects.filter(organization=org)
+        if provider:
+            agents = agents.filter(provider=provider)
+        if server_id:
+            agents = agents.filter(id=server_id)
+
+        apps = DetectedApp.objects.filter(organization=org)
+        if app_id:
+            apps = apps.filter(id=app_id)
+        if provider:
+            apps = apps.filter(agent__provider=provider)
+        if server_id:
+            apps = apps.filter(agent_id=server_id)
+
+        logs = LogEntry.objects.filter(organization=org, ts__gte=since)
+        incidents = Incident.objects.filter(organization=org, last_seen__gte=since)
+        if provider:
+            logs = logs.filter(agent__provider=provider)
+            incidents = incidents.filter(agent__provider=provider)
+        if server_id:
+            logs = logs.filter(agent_id=server_id)
+            incidents = incidents.filter(agent_id=server_id)
+        if app_id:
+            target_app = DetectedApp.objects.filter(organization=org, id=app_id).first()
+            if target_app:
+                logs = logs.filter(Q(source__icontains=target_app.name) | Q(fields_json__app_hint=target_app.name))
+
+        return {
+            'time_range': time_range,
+            'since': since,
+            'agents': agents,
+            'apps': apps,
+            'logs': logs,
+            'incidents': incidents,
+            'provider': provider,
+            'server_id': server_id,
+            'app_id': app_id,
+        }
+
+    def _overview_context(self, request, org):
+        scope = self._filtered_scope(request, org)
+        agents = scope['agents']
+        logs = scope['logs']
+        incidents = scope['incidents']
+        now = timezone.now()
+        week_ago = now - timedelta(days=7)
+        selected_agent = agents.first()
+
+        cpu_avg = MetricPoint.objects.filter(organization=org, ts__gte=scope['since'], name='cpu.percent')
+        ram_avg = MetricPoint.objects.filter(organization=org, ts__gte=scope['since'], name='mem.percent')
+        if scope['provider']:
+            cpu_avg = cpu_avg.filter(agent__provider=scope['provider'])
+            ram_avg = ram_avg.filter(agent__provider=scope['provider'])
+        if scope['server_id']:
+            cpu_avg = cpu_avg.filter(agent_id=scope['server_id'])
+            ram_avg = ram_avg.filter(agent_id=scope['server_id'])
+
+        metrics_series = MetricPoint.objects.filter(
+            organization=org,
+            ts__gte=scope['since'],
+            name__in=['cpu.percent', 'mem.percent'],
+        ).order_by('ts')
+        if scope['provider']:
+            metrics_series = metrics_series.filter(agent__provider=scope['provider'])
+        if scope['server_id']:
+            metrics_series = metrics_series.filter(agent_id=scope['server_id'])
+
+        labels, cpu_values, ram_values = [], [], []
+        grouped = {}
+        for point in metrics_series:
+            key = point.ts.replace(second=0, microsecond=0)
+            grouped.setdefault(key, {'cpu.percent': [], 'mem.percent': []})
+            grouped[key][point.name].append(point.value)
+        for ts_key in sorted(grouped.keys()):
+            labels.append(ts_key.strftime('%H:%M'))
+            cpu_values.append(sum(grouped[ts_key]['cpu.percent']) / max(len(grouped[ts_key]['cpu.percent']), 1))
+            ram_values.append(sum(grouped[ts_key]['mem.percent']) / max(len(grouped[ts_key]['mem.percent']), 1))
+
+        logs_by_severity = {lvl: logs.filter(level=lvl).count() for lvl, _ in LogEntry.Level.choices}
+        alerts_by_type = list(incidents.values('type').annotate(total=Count('id')).order_by('-total')[:8])
+        top_apps = (
+            scope['apps']
+            .annotate(error_count=Count('agent__log_entries', filter=Q(agent__log_entries__level=LogEntry.Level.ERROR)))
+            .order_by('-error_count', 'name')[:10]
+        )
+
+        return {
+            'scope': scope,
+            'kpis': {
+                'online': agents.filter(status=Agent.Status.ONLINE).count(),
+                'offline': agents.filter(status=Agent.Status.OFFLINE).count(),
+                'servers': agents.count(),
+                'apps': scope['apps'].count(),
+                'logs_24h': LogEntry.objects.filter(organization=org, ts__gte=now - timedelta(hours=24)).count(),
+                'alerts_24h': Incident.objects.filter(organization=org, last_seen__gte=now - timedelta(hours=24)).count(),
+                'threats_7d': SecurityFinding.objects.filter(organization=org, last_seen__gte=week_ago).count(),
+                'cpu_avg': round(cpu_avg.aggregate(v=Avg('value'))['v'] or 0, 2),
+                'ram_avg': round(ram_avg.aggregate(v=Avg('value'))['v'] or 0, 2),
+            },
+            'charts': {
+                'labels': labels,
+                'cpu_values': cpu_values,
+                'ram_values': ram_values,
+                'logs_labels': list(logs_by_severity.keys()),
+                'logs_values': list(logs_by_severity.values()),
+                'alerts_labels': [row['type'] for row in alerts_by_type],
+                'alerts_values': [row['total'] for row in alerts_by_type],
+            },
+            'top_apps': top_apps,
+            'providers': Agent.Provider.choices,
+            'servers': Agent.objects.filter(organization=org).order_by('hostname'),
+            'all_apps': DetectedApp.objects.filter(organization=org).order_by('name')[:200],
+        }
+
     def get(self, request):
         org = self.get_org(request)
         _sync_agent_status_for_org(org)
-        now = timezone.now()
-        offline_seconds = getattr(settings, 'AGENT_OFFLINE_SECONDS', 90)
-        time_range = request.GET.get('time_range', '15m')
-        minutes_map = {'15m': 15, '1h': 60, '24h': 1440}
-        window_minutes = minutes_map.get(time_range, 15)
-        window_15m = now - timedelta(minutes=window_minutes)
-        window_1h = now - timedelta(hours=1)
-
         if not org:
-            return render(request, 'ui/overview.html', {'empty': True, 'selected_agent': None, 'agents': []})
+            return render(request, 'ui/overview.html', {'empty': True, 'providers': Agent.Provider.choices})
 
-        agents = Agent.objects.filter(organization=org)
-        provider = request.GET.get('provider', '')
-        env = request.GET.get('env', '')
-        tag = request.GET.get('tag', '').strip()
-        if provider:
-            agents = agents.filter(provider=provider)
-        if env:
-            agents = agents.filter(environment=env)
-        if tag:
-            agents = agents.filter(tags_json__contains=[tag])
-        online_qs = agents.filter(last_seen__gte=now - timedelta(seconds=offline_seconds), status=Agent.Status.ONLINE)
-        online_ids = list(online_qs.values_list('id', flat=True))
-
-        cpu_avg = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='cpu.percent').aggregate(v=Avg('value'))['v']
-        ram_avg = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='mem.percent').aggregate(v=Avg('value'))['v']
-        disk_worst = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='disk.root.used_percent').aggregate(v=Max('value'))['v']
-        net_recv = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='net.bytes_recv').aggregate(v=Sum('value'))['v'] or 0
-        net_sent = MetricPoint.objects.filter(organization=org, ts__gte=window_15m, name='net.bytes_sent').aggregate(v=Sum('value'))['v'] or 0
-        error_logs = LogEntry.objects.filter(organization=org, ts__gte=window_1h, level=LogEntry.Level.ERROR).count()
-
-        selected_agent_id = request.GET.get('agent')
-        selected_agent = agents.filter(id=selected_agent_id).first() if selected_agent_id else agents.first()
-        series_points = MetricPoint.objects.none()
-        cpu_values, ram_values, net_in, net_out, labels = [], [], [], [], []
-        process_rows = []
-        if selected_agent:
-            series_points = MetricPoint.objects.filter(
-                organization=org,
-                agent=selected_agent,
-                ts__gte=window_15m,
-                name__in=['cpu.percent', 'mem.percent', 'net.bytes_recv', 'net.bytes_sent'],
-            ).order_by('ts')
-            grouped = {}
-            for point in series_points:
-                key = point.ts.replace(second=0, microsecond=0)
-                grouped.setdefault(key, {})[point.name] = point.value
-            for ts_key in sorted(grouped.keys()):
-                labels.append(ts_key.strftime('%H:%M'))
-                cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
-                ram_values.append(grouped[ts_key].get('mem.percent', 0))
-                net_in.append(grouped[ts_key].get('net.bytes_recv', 0))
-                net_out.append(grouped[ts_key].get('net.bytes_sent', 0))
-
-            latest_ts = ProcessSample.objects.filter(organization=org, agent=selected_agent).aggregate(v=Max('ts'))['v']
-            if latest_ts:
-                process_rows = ProcessSample.objects.filter(organization=org, agent=selected_agent, ts=latest_ts).order_by('-cpu', '-mem')[:25]
-
-        context = {
-            'empty': MetricPoint.objects.filter(organization=org).count() == 0,
-            'kpi_cards': [
-                {'title': 'Agentes Online/Offline', 'value': f'{len(online_ids)}/{max(agents.count() - len(online_ids), 0)}', 'icon': 'bi-robot'},
-                {'title': 'CPU Avg (15m)', 'value': f'{(cpu_avg or 0):.2f}%', 'icon': 'bi-cpu'},
-                {'title': 'RAM Avg (15m)', 'value': f'{(ram_avg or 0):.2f}%', 'icon': 'bi-memory'},
-                {'title': 'Disk Worst %', 'value': f'{(disk_worst or 0):.2f}%', 'icon': 'bi-device-hdd'},
-                {'title': 'Network In/Out', 'value': f'{net_recv:.0f} / {net_sent:.0f}', 'icon': 'bi-diagram-3'},
-                {'title': 'Error logs (1h)', 'value': error_logs, 'icon': 'bi-bug'},
-            ],
-            'agents': agents,
-            'selected_agent': selected_agent,
-            'cpu_labels': labels,
-            'cpu_values': cpu_values,
-            'ram_values': ram_values,
-            'net_in': net_in,
-            'net_out': net_out,
-            'process_rows': process_rows,
-            'recent_logs': LogEntry.objects.filter(organization=org).order_by('-ts')[:50],
-            'recent_heartbeats': selected_agent.heartbeats.all()[:10] if selected_agent else [],
-            'recent_incidents': Incident.objects.filter(organization=org).order_by('-last_seen')[:10],
-            'providers': Agent.Provider.choices,
-            'envs': Agent.Environment.choices,
-            'filters': {'provider': provider, 'env': env, 'tag': tag, 'time_range': time_range},
-            'top_offenders': Agent.objects.filter(organization=org).order_by('health_score')[:5],
+        context = self._overview_context(request, org)
+        context['empty'] = context['kpis']['servers'] == 0
+        context['filters'] = {
+            'provider': context['scope']['provider'],
+            'server': context['scope']['server_id'],
+            'app': context['scope']['app_id'],
+            'time_range': context['scope']['time_range'],
         }
         return render(request, 'ui/overview.html', context)
+
+
+class OverviewKpiPartialView(OverviewView):
+    def get(self, request):
+        context = self._overview_context(request, self.get_org(request))
+        return render(request, 'ui/partials/overview_kpis.html', context)
+
+
+class OverviewChartsPartialView(OverviewView):
+    def get(self, request):
+        context = self._overview_context(request, self.get_org(request))
+        return render(request, 'ui/partials/overview_charts.html', context)
+
+
+class OverviewTablesPartialView(OverviewView):
+    def get(self, request):
+        context = self._overview_context(request, self.get_org(request))
+        return render(request, 'ui/partials/overview_tables.html', context)
 
 
 class WidgetCreateView(RoleRequiredMixin, View):
@@ -240,7 +309,14 @@ class ServersListView(RoleRequiredMixin, OrgScopedMixin, View):
 
     def get(self, request):
         org = self.get_org(request)
-        return render(request, 'ui/servers_list.html', {'servers': Agent.objects.filter(organization=org) if org else []})
+        provider = request.GET.get('provider', '')
+        status = request.GET.get('status', '')
+        servers = Agent.objects.filter(organization=org) if org else Agent.objects.none()
+        if provider:
+            servers = servers.filter(provider=provider)
+        if status:
+            servers = servers.filter(status=status)
+        return render(request, 'ui/servers_list.html', {'servers': servers, 'filters': {'provider': provider, 'status': status}})
 
 
 class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
@@ -296,13 +372,36 @@ class LogsExplorerView(RoleRequiredMixin, OrgScopedMixin, View):
 
     def get(self, request):
         level_filter = request.GET.get('level', '')
-        search = request.GET.get('q', '').strip()
+        search = request.GET.get('contains', request.GET.get('q', '')).strip()
+        provider = request.GET.get('provider', '')
+        server_id = request.GET.get('server', '')
+        app_id = request.GET.get('app', '')
+        time_range = request.GET.get('time_range', '24h')
         org = self.get_org(request)
         logs = LogEntry.objects.filter(organization=org).order_by('-ts') if org else LogEntry.objects.none()
         if level_filter:
             logs = logs.filter(level=level_filter)
         if search:
             logs = logs.filter(message__icontains=search)
+        if provider:
+            logs = logs.filter(agent__provider=provider)
+        if server_id:
+            logs = logs.filter(agent_id=server_id)
+        if app_id:
+            app = DetectedApp.objects.filter(organization=org, id=app_id).first()
+            if app:
+                logs = logs.filter(Q(source__icontains=app.name) | Q(fields_json__app_hint=app.name))
+        minutes = {'15m': 15, '1h': 60, '24h': 1440, '7d': 10080}.get(time_range, 1440)
+        logs = logs.filter(ts__gte=timezone.now() - timedelta(minutes=minutes))
+        if request.GET.get('export') == 'csv':
+            import csv
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = 'attachment; filename="buho_logs.csv"'
+            writer = csv.writer(response)
+            writer.writerow(['timestamp', 'level', 'source', 'agent', 'message'])
+            for row in logs[:2000]:
+                writer.writerow([row.ts.isoformat(), row.level, row.source, row.agent.hostname, row.message])
+            return response
         return render(request, 'ui/logs.html', {'logs': logs[:200], 'level_filter': level_filter, 'search': search})
 
 

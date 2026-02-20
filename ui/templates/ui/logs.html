@@ -1,24 +1,13 @@
-{% extends 'ui/base.html' %}
-{% load ui_tags %}
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}SIEM / Logs{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3"><h1 class="h4 mb-0">Logs</h1><button class="btn btn-outline-secondary btn-sm" data-bs-toggle="offcanvas" data-bs-target="#filters">Filters</button></div>
-<div class="offcanvas offcanvas-end" tabindex="-1" id="filters">
-  <div class="offcanvas-header"><h5>Filter logs</h5><button class="btn-close" data-bs-dismiss="offcanvas"></button></div>
-  <div class="offcanvas-body">
-    <form method="get" class="vstack gap-2">
-      <select class="form-select" name="level"><option value="">All levels</option>{% for lvl in 'INFO,WARN,ERROR'.split(',') %}<option value="{{ lvl }}" {% if level_filter == lvl %}selected{% endif %}>{{ lvl }}</option>{% endfor %}</select>
-      <input class="form-control" name="q" value="{{ search }}" placeholder="Text in message">
-      <button class="btn btn-primary">Apply</button>
-    </form>
-  </div>
-</div>
-<div class="card table-card">
-  <div class="table-responsive sticky-table">
-    <table class="table table-striped align-middle mb-0"><thead><tr><th>Timestamp</th><th>Agent</th><th>Source</th><th>Level</th><th>Message</th></tr></thead><tbody>
-      {% for log in logs %}
-      <tr><td>{{ log.ts|date:'Y-m-d H:i:s' }}</td><td>{{ log.agent.name }}</td><td>{{ log.source }}</td><td><span class="badge text-bg-{{ log.level|badge_class }}">{{ log.level }}</span></td><td>{{ log.message }}</td></tr>
-      {% empty %}<tr><td colspan="5" class="text-body-secondary">No logs match current filters.</td></tr>{% endfor %}
+<div x-data="{selected:''}" class="grid lg:grid-cols-3 gap-4">
+  <div class="lg:col-span-2 glass p-4">
+    <h1 class="text-xl mb-3">SIEM Explorer</h1>
+    <table class="table-noc"><thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Message</th></tr></thead><tbody>
+      {% for log in logs %}<tr @click="selected=`{{ log.message|escapejs }}`"><td>{{ log.ts|date:'Y-m-d H:i:s' }}</td><td><span class="badge-noc {% if log.level == 'ERROR' %}badge-error{% elif log.level == 'WARN' %}badge-warn{% else %}badge-info{% endif %}">{{ log.level }}</span></td><td>{{ log.source }}</td><td>{{ log.message|truncatechars:90 }}</td></tr>{% empty %}<tr><td colspan="4">No telemetry yet — Deploy an agent</td></tr>{% endfor %}
     </tbody></table>
   </div>
+  <aside class="glass p-4"><h2 class="mb-2">Log detail</h2><p class="text-sm text-slate-300" x-text="selected || 'Select a row to inspect full payload.'"></p><a href="?export=csv" class="btn-noc btn-secondary-noc mt-3 inline-block">Export CSV</a></aside>
 </div>
 {% endblock %}

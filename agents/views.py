@@ -738,6 +738,50 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         })
 
 
+
+
+class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
+    require_organization = True
+
+    def get(self, request, agent_id, tab):
+        agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
+        tabs = {
+            'metrics': 'agents/partials/agent_metrics.html',
+            'apps': 'agents/partials/agent_apps.html',
+            'processes': 'agents/partials/agent_processes.html',
+            'logs': 'agents/partials/agent_logs.html',
+            'alerts': 'agents/partials/agent_alerts.html',
+            'threats': 'agents/partials/agent_threats_tab.html',
+        }
+        template = tabs.get(tab)
+        if not template:
+            return HttpResponseBadRequest('Invalid tab')
+        context = {'agent': agent}
+        if tab == 'metrics':
+            metrics = MetricPoint.objects.filter(agent=agent, name__in=['cpu.percent','mem.percent','disk.root.used_percent','net.bytes_recv','net.bytes_sent']).order_by('ts')[:400]
+            grouped, labels, cpu_values, mem_values = {}, [], [], []
+            for point in metrics:
+                key = point.ts.replace(second=0, microsecond=0)
+                grouped.setdefault(key, {})[point.name] = point.value
+            for ts_key in sorted(grouped.keys()):
+                labels.append(ts_key.strftime('%H:%M'))
+                cpu_values.append(grouped[ts_key].get('cpu.percent', 0))
+                mem_values.append(grouped[ts_key].get('mem.percent', 0))
+            context.update({'labels': labels, 'cpu_values': cpu_values, 'mem_values': mem_values})
+        elif tab == 'apps':
+            context['apps'] = DetectedApp.objects.filter(agent=agent).order_by('-last_seen')[:100]
+        elif tab == 'processes':
+            latest = ProcessSample.objects.filter(agent=agent).order_by('-ts').values_list('ts', flat=True).first()
+            context['processes'] = ProcessSample.objects.filter(agent=agent, ts=latest).order_by('-cpu','-mem')[:100] if latest else []
+        elif tab == 'logs':
+            context['logs'] = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
+        elif tab == 'alerts':
+            context['incidents'] = Incident.objects.filter(agent=agent).order_by('-last_seen')[:120]
+        elif tab == 'threats':
+            context['findings'] = SecurityFinding.objects.filter(agent=agent).order_by('-last_seen')[:120]
+            context['vt_available'] = bool(os.environ.get('VT_API_KEY'))
+        return render(request, template, context)
 class ThreatsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
     require_organization = True

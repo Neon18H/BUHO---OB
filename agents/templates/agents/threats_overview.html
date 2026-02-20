@@ -1,19 +1,16 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}Threats / Acción Nocturna{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Threats Overview</h1>
-<div class="row g-3 mb-3">
-  <div class="col-md-4"><div class="card p-3"><div class="text-muted">High/Critical Open</div><div class="display-6">{{ high_critical }}</div></div></div>
+<div class="glass p-4 mb-4">
+  <h1 class="text-xl">Threats</h1>
+  {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}
+  {% if recent_findings %}<a href="{% url 'agents:detail' recent_findings.0.agent.id %}" class="btn-noc btn-danger-noc text-lg inline-block">ACCION NOCTURNA</a>{% endif %}
+  {% endif %}
+  <p class="text-slate-400 text-sm mt-2">High/Critical open: {{ high_critical }}</p>
 </div>
-<div class="card p-3 mb-3">
-  <h6>By agent</h6>
-  <ul class="list-group list-group-flush">
-    {% for row in by_agent %}<li class="list-group-item d-flex justify-content-between"><span>{{ row.agent__name }}</span><span>{{ row.total }}</span></li>{% empty %}<li class="list-group-item">No findings</li>{% endfor %}
-  </ul>
-</div>
-<div class="card p-3">
-  <h6>Recent findings</h6>
-  <table class="table table-sm"><thead><tr><th>Agent</th><th>Severity</th><th>Category</th><th>Title</th><th>Last seen</th></tr></thead><tbody>
-    {% for finding in recent_findings %}<tr><td><a href="{% url 'agents:agent_threats' finding.agent.id %}">{{ finding.agent.name }}</a></td><td>{{ finding.severity }}</td><td>{{ finding.category }}</td><td>{{ finding.title }}</td><td>{{ finding.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings</td></tr>{% endfor %}
+<div class="glass p-4">
+  <table class="table-noc"><thead><tr><th>Agent</th><th>Path/Title</th><th>Yara/VT</th><th>Severity</th><th>Time</th></tr></thead><tbody>
+  {% for finding in recent_findings %}<tr><td>{{ finding.agent.name }}</td><td>{{ finding.title }}</td><td>{{ finding.category }}</td><td>{{ finding.severity }}</td><td>{{ finding.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings yet.</td></tr>{% endfor %}
   </tbody></table>
 </div>
 {% endblock %}

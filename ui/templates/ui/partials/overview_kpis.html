@@ -1,0 +1,8 @@
+<div class="grid md:grid-cols-3 xl:grid-cols-6 gap-3">
+  <div class="glass p-3"><p class="text-xs text-slate-400">Agents</p><p class="metric text-xl">{{ kpis.online }}/{{ kpis.offline }}</p></div>
+  <div class="glass p-3"><p class="text-xs text-slate-400">Servers</p><p class="metric text-xl">{{ kpis.servers }}</p></div>
+  <div class="glass p-3"><p class="text-xs text-slate-400">Apps</p><p class="metric text-xl">{{ kpis.apps }}</p></div>
+  <div class="glass p-3"><p class="text-xs text-slate-400">Logs (24h)</p><p class="metric text-xl">{{ kpis.logs_24h }}</p></div>
+  <div class="glass p-3"><p class="text-xs text-slate-400">Alerts (24h)</p><p class="metric text-xl">{{ kpis.alerts_24h }}</p></div>
+  <div class="glass p-3"><p class="text-xs text-slate-400">Threats (7d)</p><p class="metric text-xl">{{ kpis.threats_7d }}</p></div>
+</div>

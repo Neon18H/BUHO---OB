@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from agents.views import ThreatsOverviewView
+from ui.views import BuhoLogoutView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -9,5 +10,6 @@ urlpatterns = [
     path('', include(('accounts.urls', 'accounts'), namespace='accounts')),
     path('agents/', include(('agents.urls', 'agents'), namespace='agents')),
     path('threats/overview', ThreatsOverviewView.as_view(), name='threats_overview'),
+    path('logout/', BuhoLogoutView.as_view(), name='logout'),
     path('api/', include('api.urls')),
 ]
