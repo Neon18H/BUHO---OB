@@ -49,7 +49,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'django_vite',
     'accounts',
     'audit',
     'ui',
@@ -126,20 +125,9 @@ if HAS_WHITENOISE:
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'accounts.User'
-LOGIN_URL = '/auth/login/'
+LOGIN_URL = 'accounts:login'
 LOGIN_REDIRECT_URL = 'ui:overview'
-LOGOUT_REDIRECT_URL = '/auth/login/'
-
-VITE_DEV_SERVER = os.getenv('VITE_DEV_SERVER', 'http://localhost:5173')
-VITE_MANIFEST_PATH = BASE_DIR / 'static' / 'vite' / 'manifest.json'
-DJANGO_VITE = {
-    'default': {
-        'dev_mode': DEBUG,
-        'dev_server_host': 'localhost',
-        'dev_server_port': 5173,
-        'manifest_path': VITE_MANIFEST_PATH,
-    }
-}
+LOGOUT_REDIRECT_URL = 'accounts:login'
 
 ROLE_HIERARCHY = {
     'SUPERADMIN': 4,

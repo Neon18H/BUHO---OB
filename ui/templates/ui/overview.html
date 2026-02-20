@@ -1,4 +1,33 @@
-{% extends 'ui/base_noc.html' %}
+{% extends 'ui/base.html' %}
 {% block content %}
-<div id="app-root" data-page="overview"></div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div><h1 class="h3 mb-0">Overview</h1><small class="text-body-secondary">Deep monitoring telemetry and SOC posture.</small></div>
+</div>
+<form method="get" class="row g-2 mb-3">
+  <div class="col-md-3"><select class="form-select input-night" name="agent">{% for agent in agents %}<option value="{{ agent.id }}" {% if selected_agent and selected_agent.id == agent.id %}selected{% endif %}>{{ agent.name }}</option>{% endfor %}</select></div>
+  <div class="col-md-2"><select class="form-select input-night" name="provider"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}" {% if filters.provider == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <div class="col-md-2"><select class="form-select input-night" name="env"><option value="">Env</option>{% for key,label in envs %}<option value="{{ key }}" {% if filters.env == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+  <div class="col-md-2"><input class="form-control input-night" name="tag" value="{{ filters.tag }}" placeholder="tag"></div>
+  <div class="col-md-2"><select class="form-select input-night" name="time_range"><option value="15m" {% if filters.time_range == '15m' %}selected{% endif %}>15m</option><option value="1h" {% if filters.time_range == '1h' %}selected{% endif %}>1h</option><option value="24h" {% if filters.time_range == '24h' %}selected{% endif %}>24h</option></select></div>
+  <div class="col-md-1"><button class="btn btn-neon w-100">Go</button></div>
+</form>
+<div class="row g-3 mb-4">{% for kpi in kpi_cards %}<div class="col-sm-6 col-xl-4">{% include 'ui/components/kpi_card.html' with icon=kpi.icon title=kpi.title value=kpi.value %}</div>{% endfor %}</div>
+<div class="row g-3"><div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='CPU / RAM' chart_id='cpuRamChart' %}</div><div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Network In / Out' chart_id='networkChart' %}</div></div>
+<div class="card card-night mt-3 p-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <h6 class="mb-0">Top offenders</h6>
+    <span class="health-chip">Health Score Signal</span>
+  </div>
+  <ul class="mb-0 mt-2">
+    {% for item in top_offenders %}
+      <li class="d-flex justify-content-between py-1"><span>{{ item.name }} · {{ item.get_provider_display }}</span> <span class="badge alert-badge-pulse" style="background:linear-gradient(90deg,#ffb703,#ff4d6d);">health {{ item.health_score }}</span></li>
+    {% empty %}
+      <li>Sin datos</li>
+    {% endfor %}
+  </ul>
+</div>
 {% endblock %}
+{% block scripts %}<script>
+new Chart(document.getElementById('cpuRamChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'CPU %',data:{{ cpu_values|safe }},borderColor:'#6C63FF',tension:.35},{label:'RAM %',data:{{ ram_values|safe }},borderColor:'#00E5FF',tension:.35}]}});
+new Chart(document.getElementById('networkChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'In',data:{{ net_in|safe }},borderColor:'#00C896'},{label:'Out',data:{{ net_out|safe }},borderColor:'#FF4D6D'}]}});
+</script>{% endblock %}
