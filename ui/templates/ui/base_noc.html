@@ -1,0 +1,51 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Buho NOC{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="{% static 'css/buho_noc.css' %}">
+  <link rel="stylesheet" href="{% static 'css/buho_components.css' %}">
+  <link rel="stylesheet" href="{% static 'css/buho_effects.css' %}">
+</head>
+<body class="noc-mode noc-grid scanline" x-data="{open:true}">
+<div class="layout-shell">
+  <aside class="sidebar p-4" :class="open ? 'block' : 'hidden md:block md:w-20'">
+    <div class="flex items-center gap-2 mb-6"><span class="text-teal-300">🦉</span><div x-show="open"><p class="font-bold">BUHO</p><p class="text-xs text-slate-400">NOC MODE</p></div></div>
+    <nav class="space-y-2 text-sm">
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:overview' %}">Overview</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:overview' %}">Agents</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:servers' %}">Servers</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:apps' %}">Apps</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:logs' %}">Logs</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:alerts' %}">Alerts</a>
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:threats_overview' %}">Threats</a>
+    </nav>
+  </aside>
+  <div class="content-wrap">
+    <header class="glass p-3 mb-4 flex flex-wrap gap-3 items-center justify-between">
+      <div class="flex items-center gap-2">
+        <button class="btn-secondary-noc btn-noc" @click="open=!open">☰</button>
+        <input class="bg-slate-900/70 border border-slate-700 rounded px-3 py-2 text-sm w-64" placeholder="Search telemetry…">
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        {% if active_org %}<span class="badge-noc badge-info">ORG: {{ active_org.name }}</span>{% endif %}
+        <form method="get" class="inline"><select name="time_range" onchange="this.form.submit()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1"><option>15m</option><option>1h</option><option>24h</option><option>7d</option></select></form>
+        <span class="badge-noc badge-online">NOC MODE</span>
+        <span class="text-slate-300">{{ request.user.username }}</span>
+        <form method="POST" action="{% url 'logout' %}">{% csrf_token %}<button class="btn-danger-noc btn-noc" type="submit">Logout</button></form>
+      </div>
+    </header>
+    <div class="text-xs text-slate-500 mb-2">{% block breadcrumbs %}Home{% endblock %}</div>
+    {% if messages %}<div class="space-y-2 mb-4">{% for message in messages %}<div class="glass p-2 text-sm">{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

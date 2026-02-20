@@ -1,20 +1,10 @@
-{% extends 'ui/base.html' %}
-{% load ui_tags %}
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}Alerts{% endblock %}
 {% block content %}
-<h1 class="h4 mb-3">Alerts</h1>
-<div class="card table-card">
-<div class="table-responsive sticky-table"><table class="table align-middle mb-0">
-<thead><tr><th>Type</th><th>Agent</th><th>Severity</th><th>Status</th><th>Started</th><th>Last seen</th></tr></thead>
-<tbody>
-{% for alert in alerts %}
-<tr>
-  <td>{{ alert.type }}</td>
-  <td>{{ alert.agent.name|default:'N/A' }}</td>
-  <td><span class="badge text-bg-{{ alert.severity|badge_class }}">{{ alert.severity }}</span></td>
-  <td><span class="badge text-bg-{{ alert.status|badge_class }}">{{ alert.status }}</span></td>
-  <td>{{ alert.started_at|date:'Y-m-d H:i:s' }}</td>
-  <td>{{ alert.last_seen|date:'Y-m-d H:i:s' }}</td>
-</tr>
-{% empty %}<tr><td colspan="6" class="text-body-secondary">No incidents yet.</td></tr>{% endfor %}
-</tbody></table></div></div>
+<div class="glass p-4">
+  <h1 class="text-xl mb-4">Alerts & severity</h1>
+  <table class="table-noc"><thead><tr><th>Type</th><th>Severity</th><th>Status</th><th>Agent</th><th>Last seen</th></tr></thead><tbody>
+    {% for alert in alerts %}<tr><td>{{ alert.get_type_display }}</td><td><span class="badge-noc {% if alert.severity == 'CRITICAL' %}badge-sev1{% elif alert.severity == 'HIGH' %}badge-sev2{% else %}badge-sev3{% endif %}">{{ alert.severity }}</span></td><td>{{ alert.status }}</td><td>{{ alert.agent.name|default:'-' }}</td><td>{{ alert.last_seen|date:'Y-m-d H:i' }}</td></tr>{% empty %}<tr><td colspan="5">No alerts yet · rules coming</td></tr>{% endfor %}
+  </tbody></table>
+</div>
 {% endblock %}

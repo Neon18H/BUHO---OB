@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AgentDetailTabView,
     AgentDetailView,
     AgentDownloadAgentPyView,
     AgentDownloadLinuxView,
@@ -29,5 +30,6 @@ urlpatterns = [
     path('download/windows.ps1', AgentDownloadWindowsView.as_view(), name='download_windows'),
     path('threats/overview/', ThreatsOverviewView.as_view(), name='threats_overview'),
     path('<int:agent_id>/threats/', AgentThreatsView.as_view(), name='agent_threats'),
+    path('<int:agent_id>/tabs/<str:tab>/', AgentDetailTabView.as_view(), name='detail_tab'),
     path('<int:agent_id>/', AgentDetailView.as_view(), name='detail'),
 ]

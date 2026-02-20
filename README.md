@@ -101,3 +101,7 @@ Si tienes más de un dominio, usa valores separados por coma en `ALLOWED_HOSTS` 
 - Simular **GCP**: exportar `GOOGLE_CLOUD_PROJECT=demo-project`.
 - Forzar tags/env en config del agente (`tags`, `environment`) y validar en UI de Overview/Agents/Apps.
 - Endpoint de discovery: `POST /api/ingest/discovery` (usa cabeceras `X-Buho-Agent-Id` y `X-Buho-Agent-Key`).
+
+## Frontend stack (No npm needed)
+Buho UI runs with Django templates and CDN assets only (Tailwind CDN, Alpine.js, HTMX, Chart.js). No React build pipeline or npm install is required.
+

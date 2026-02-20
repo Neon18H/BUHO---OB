@@ -1,33 +1,19 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
+{% block title %}Overview · Buho{% endblock %}
+{% block breadcrumbs %}Overview{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div><h1 class="h3 mb-0">Overview</h1><small class="text-body-secondary">Deep monitoring telemetry and SOC posture.</small></div>
-</div>
-<form method="get" class="row g-2 mb-3">
-  <div class="col-md-3"><select class="form-select input-night" name="agent">{% for agent in agents %}<option value="{{ agent.id }}" {% if selected_agent and selected_agent.id == agent.id %}selected{% endif %}>{{ agent.name }}</option>{% endfor %}</select></div>
-  <div class="col-md-2"><select class="form-select input-night" name="provider"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}" {% if filters.provider == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-  <div class="col-md-2"><select class="form-select input-night" name="env"><option value="">Env</option>{% for key,label in envs %}<option value="{{ key }}" {% if filters.env == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-  <div class="col-md-2"><input class="form-control input-night" name="tag" value="{{ filters.tag }}" placeholder="tag"></div>
-  <div class="col-md-2"><select class="form-select input-night" name="time_range"><option value="15m" {% if filters.time_range == '15m' %}selected{% endif %}>15m</option><option value="1h" {% if filters.time_range == '1h' %}selected{% endif %}>1h</option><option value="24h" {% if filters.time_range == '24h' %}selected{% endif %}>24h</option></select></div>
-  <div class="col-md-1"><button class="btn btn-neon w-100">Go</button></div>
+<form id="overview-filters" class="glass p-4 mb-4 grid md:grid-cols-5 gap-3" hx-get="{% url 'ui:overview_kpis_partial' %}" hx-target="#kpi-zone" hx-trigger="change from:select, keyup delay:500ms from:input">
+  <select name="provider" class="bg-slate-900 border border-slate-700 rounded px-2 py-2"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}" {% if filters.provider == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="server" class="bg-slate-900 border border-slate-700 rounded px-2 py-2"><option value="">Server</option>{% for server in servers %}<option value="{{ server.id }}" {% if filters.server == server.id|stringformat:'s' %}selected{% endif %}>{{ server.hostname }}</option>{% endfor %}</select>
+  <select name="app" class="bg-slate-900 border border-slate-700 rounded px-2 py-2"><option value="">App</option>{% for app in all_apps %}<option value="{{ app.id }}" {% if filters.app == app.id|stringformat:'s' %}selected{% endif %}>{{ app.name }}</option>{% endfor %}</select>
+  <select name="time_range" class="bg-slate-900 border border-slate-700 rounded px-2 py-2"><option value="15m" {% if filters.time_range == '15m' %}selected{% endif %}>15m</option><option value="1h" {% if filters.time_range == '1h' %}selected{% endif %}>1h</option><option value="24h" {% if filters.time_range == '24h' %}selected{% endif %}>24h</option><option value="7d" {% if filters.time_range == '7d' %}selected{% endif %}>7d</option></select>
+  <div class="htmx-indicator skeleton"></div>
 </form>
-<div class="row g-3 mb-4">{% for kpi in kpi_cards %}<div class="col-sm-6 col-xl-4">{% include 'ui/components/kpi_card.html' with icon=kpi.icon title=kpi.title value=kpi.value %}</div>{% endfor %}</div>
-<div class="row g-3"><div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='CPU / RAM' chart_id='cpuRamChart' %}</div><div class="col-lg-6">{% include 'ui/components/chart_card.html' with title='Network In / Out' chart_id='networkChart' %}</div></div>
-<div class="card card-night mt-3 p-3">
-  <div class="d-flex justify-content-between align-items-center">
-    <h6 class="mb-0">Top offenders</h6>
-    <span class="health-chip">Health Score Signal</span>
-  </div>
-  <ul class="mb-0 mt-2">
-    {% for item in top_offenders %}
-      <li class="d-flex justify-content-between py-1"><span>{{ item.name }} · {{ item.get_provider_display }}</span> <span class="badge alert-badge-pulse" style="background:linear-gradient(90deg,#ffb703,#ff4d6d);">health {{ item.health_score }}</span></li>
-    {% empty %}
-      <li>Sin datos</li>
-    {% endfor %}
-  </ul>
-</div>
+<div id="kpi-zone">{% include 'ui/partials/overview_kpis.html' %}</div>
+<div id="charts-zone" class="mt-4">{% include 'ui/partials/overview_charts.html' %}</div>
+<div id="tables-zone" class="mt-4">{% include 'ui/partials/overview_tables.html' %}</div>
+<script>
+const updateOverviewPanels=()=>{const q=new URLSearchParams(new FormData(document.getElementById('overview-filters'))).toString();htmx.ajax('GET','{% url 'ui:overview_charts_partial' %}?'+q,{target:'#charts-zone'});htmx.ajax('GET','{% url 'ui:overview_tables_partial' %}?'+q,{target:'#tables-zone'});};
+document.getElementById('overview-filters').addEventListener('change',updateOverviewPanels);
+</script>
 {% endblock %}
-{% block scripts %}<script>
-new Chart(document.getElementById('cpuRamChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'CPU %',data:{{ cpu_values|safe }},borderColor:'#6C63FF',tension:.35},{label:'RAM %',data:{{ ram_values|safe }},borderColor:'#00E5FF',tension:.35}]}});
-new Chart(document.getElementById('networkChart'), {type:'line', data:{labels:{{ cpu_labels|safe }},datasets:[{label:'In',data:{{ net_in|safe }},borderColor:'#00C896'},{label:'Out',data:{{ net_out|safe }},borderColor:'#FF4D6D'}]}});
-</script>{% endblock %}

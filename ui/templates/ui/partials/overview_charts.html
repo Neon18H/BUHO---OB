@@ -1,0 +1,10 @@
+<div class="grid lg:grid-cols-3 gap-4">
+  <div class="glass p-4 lg:col-span-2"><h3 class="mb-2">CPU / RAM promedio</h3><canvas id="cpuRamChart"></canvas></div>
+  <div class="glass p-4"><h3 class="mb-2">Alerts por tipo</h3><canvas id="alertsTypeChart"></canvas></div>
+  <div class="glass p-4 lg:col-span-3"><h3 class="mb-2">Logs por severidad</h3><canvas id="logsSeverityChart"></canvas></div>
+</div>
+<script>
+new Chart(document.getElementById('cpuRamChart'),{type:'line',data:{labels:{{ charts.labels|safe }},datasets:[{label:'CPU',data:{{ charts.cpu_values|safe }},borderColor:'#38bdf8'},{label:'RAM',data:{{ charts.ram_values|safe }},borderColor:'#34d399'}]}});
+new Chart(document.getElementById('logsSeverityChart'),{type:'bar',data:{labels:{{ charts.logs_labels|safe }},datasets:[{label:'Logs',data:{{ charts.logs_values|safe }},backgroundColor:['#7dd3fc','#facc15','#f87171']}]}});
+new Chart(document.getElementById('alertsTypeChart'),{type:'doughnut',data:{labels:{{ charts.alerts_labels|safe }},datasets:[{data:{{ charts.alerts_values|safe }},backgroundColor:['#38bdf8','#22d3ee','#34d399','#fb7185','#fbbf24']}]}});
+</script>

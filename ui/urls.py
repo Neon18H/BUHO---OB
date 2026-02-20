@@ -6,6 +6,9 @@ from .views import (
     AppsListView,
     LogsExplorerView,
     OrganizationUpdateView,
+    OverviewChartsPartialView,
+    OverviewKpiPartialView,
+    OverviewTablesPartialView,
     OverviewView,
     ServerDetailView,
     ServersListView,
@@ -21,6 +24,9 @@ app_name = 'ui'
 
 urlpatterns = [
     path('', OverviewView.as_view(), name='overview'),
+    path('ui/partials/overview_kpis', OverviewKpiPartialView.as_view(), name='overview_kpis_partial'),
+    path('ui/partials/overview_charts', OverviewChartsPartialView.as_view(), name='overview_charts_partial'),
+    path('ui/partials/overview_tables', OverviewTablesPartialView.as_view(), name='overview_tables_partial'),
     path('servers/', ServersListView.as_view(), name='servers'),
     path('servers/<int:server_id>/', ServerDetailView.as_view(), name='server_detail'),
     path('apps/', AppsListView.as_view(), name='apps'),

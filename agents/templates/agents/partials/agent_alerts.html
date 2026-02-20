@@ -1,0 +1,1 @@
+<table class="table-noc"><thead><tr><th>Type</th><th>Severity</th><th>Status</th></tr></thead><tbody>{% for i in incidents %}<tr><td>{{ i.type }}</td><td>{{ i.severity }}</td><td>{{ i.status }}</td></tr>{% empty %}<tr><td colspan="3">No alerts.</td></tr>{% endfor %}</tbody></table>

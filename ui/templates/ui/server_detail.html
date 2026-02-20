@@ -1,12 +1,10 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}Infrastructure / Servers / {{ server.hostname }}{% endblock %}
 {% block content %}
-<h1 class="h4 mb-3">{{ server.name }}</h1>
-<div class="card p-3">
-  <div><strong>Hostname:</strong> {{ server.hostname }}</div>
-  <div><strong>IP:</strong> {{ server.ip_address }}</div>
-  <div><strong>OS:</strong> {{ server.os }} ({{ server.arch }})</div>
-  <div><strong>Version:</strong> {{ server.version }}</div>
-  <div><strong>Status:</strong> {{ server.status }}</div>
-  <div><strong>Last seen:</strong> {{ server.last_seen|date:'Y-m-d H:i:s' }}</div>
+<div x-data="{tab:'metrics'}" class="space-y-4">
+  <div class="glass p-4"><h1 class="text-xl">{{ server.hostname }}</h1><p class="text-slate-400">Server Health · uptime inferred by heartbeats · last heartbeat {{ server.last_seen|date:'Y-m-d H:i:s' }}</p></div>
+  <div class="flex gap-2">{% for t in 'metrics,processes,apps,logs,health'.split(',') %}<button class="tab-btn" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'">{{ t|title }}</button>{% endfor %}</div>
+  <div class="glass p-4" x-show="tab==='health'">Provider {{ server.get_provider_display }} · OS {{ server.os }} · Version {{ server.version }}</div>
+  <div class="glass p-4" x-show="tab!=='health'">Data available in agent detail tabs.</div>
 </div>
 {% endblock %}
