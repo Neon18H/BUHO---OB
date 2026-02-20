@@ -3,7 +3,10 @@
 {% block content %}
 <div x-data="{tab:'metrics'}" class="space-y-4">
   <div class="glass p-4 flex justify-between items-center"><div><h1 class="text-xl">{{ agent.hostname }}</h1><p class="text-sm text-slate-400">{{ agent.get_provider_display }} · {{ agent.os }} · {{ agent.ip_address }}</p></div><a href="{% url 'agents:agent_threats' agent.id %}" class="btn-noc btn-danger-noc">Acción Nocturna</a></div>
-  <div class="flex flex-wrap gap-2">{% for t in 'metrics,apps,processes,logs,alerts,threats'.split(',') %}<button class="tab-btn" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'agents:detail_tab' agent.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#tab-content'})">{{ t|title }}</button>{% endfor %}</div>
+  <div class="flex flex-wrap gap-2">{% for t in agent_tabs %}<button class="tab-btn" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'agents:detail_tab' agent.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#tab-content'})">{{ t|title }}</button>{% endfor %}</div>
+  {% if not labels and not apps and not logs and not incidents and not processes %}
+  <div class="glass p-4 text-slate-300">{{ no_data_message }}</div>
+  {% endif %}
   <div id="tab-content" class="glass p-4" hx-get="{% url 'agents:detail_tab' agent.id 'metrics' %}" hx-trigger="load">Loading...</div>
 </div>
 {% endblock %}

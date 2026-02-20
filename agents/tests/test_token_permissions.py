@@ -78,9 +78,4 @@ class AgentTokenPermissionTests(TestCase):
 
         response = self.client.get(self.install_url, follow=True)
 
-        self.assertRedirects(response, reverse('ui:settings'))
-        messages = [message.message for message in response.context['messages']]
-        self.assertIn(
-            'Tu usuario no tiene organización asignada. Contacta a un administrador o configura tu perfil.',
-            messages,
-        )
+        self.assertRedirects(response, reverse('auth_register'))

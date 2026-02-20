@@ -26,6 +26,9 @@
       <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:logs' %}">Logs</a>
       <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:alerts' %}">Alerts</a>
       <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:threats_overview' %}">Threats</a>
+      {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}
+      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:admin_users' %}">Usuarios</a>
+      {% endif %}
     </nav>
   </aside>
   <div class="content-wrap">

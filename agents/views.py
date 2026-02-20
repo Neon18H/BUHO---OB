@@ -12,6 +12,7 @@ from django.views import View
 
 from audit.utils import create_audit_log
 from buho.runtime import get_public_base_url
+from accounts.models import Organization
 from ui.permissions import RoleRequiredUIMixin
 
 from .forms import TokenCreateForm
@@ -783,7 +784,10 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         agents.filter(last_seen__lt=offline_cutoff).exclude(status=Agent.Status.OFFLINE).update(status=Agent.Status.OFFLINE)
         agents.filter(last_seen__lt=degraded_cutoff, last_seen__gte=offline_cutoff).exclude(status=Agent.Status.DEGRADED).update(status=Agent.Status.DEGRADED)
         agents.filter(last_seen__gte=degraded_cutoff).exclude(status=Agent.Status.ONLINE).update(status=Agent.Status.ONLINE)
-        create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='AgentList', metadata={'count': agents.count()})
+        try:
+            create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='AgentList', metadata={'count': agents.count()})
+        except Exception as exc:
+            logger.warning('Audit log failed for agents overview user=%s: %s', request.user.id, exc)
         return render(
             request,
             'agents/overview.html',
@@ -840,7 +844,10 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
     def get(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
-        create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='Agent', target_id=str(agent.id))
+        try:
+            create_audit_log(request=request, actor=request.user, action='VIEW_AGENT', target_type='Agent', target_id=str(agent.id))
+        except Exception as exc:
+            logger.warning('Audit log failed for agent detail user=%s agent=%s: %s', request.user.id, agent.id, exc)
         time_range = request.GET.get('time_range', '1h')
         minutes = {'15m': 15, '1h': 60, '24h': 1440}.get(time_range, 60)
         since = timezone.now() - timedelta(minutes=minutes)
@@ -868,6 +875,7 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         vt_available = bool(os.environ.get('VT_API_KEY'))
         return render(request, 'agents/detail.html', {
             'agent': agent,
+            'agent_tabs': ['metrics', 'apps', 'processes', 'logs', 'alerts', 'threats'],
             'heartbeats': agent.heartbeats.all()[:20],
             'apps': apps,
             'labels': labels,
@@ -885,6 +893,7 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             'last_logs_at': last_logs_at,
             'latest_nocturnal_run': latest_run,
             'vt_available': vt_available,
+            'no_data_message': 'Waiting for agent telemetry',
         })
 
 
@@ -1005,6 +1014,8 @@ class TokenCreateView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             return redirect(request.META.get('HTTP_REFERER', 'agents:tokens'))
 
         org = self.scoped_organization(request)
+        if org is None and request.user.is_superuser:
+            org = request.user.organization or Organization.objects.order_by('id').first()
         if org is None:
             messages.error(request, 'No tienes organización asignada.')
             return redirect('agents:tokens')

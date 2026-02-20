@@ -64,6 +64,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'buho.middleware.OnboardingRequiredMiddleware',
+    'buho.middleware.ExceptionLoggingMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -138,5 +140,30 @@ ROLE_HIERARCHY = {
 
 RETENTION_DAYS = 7
 AGENT_OFFLINE_SECONDS = 90
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '%(asctime)s %(levelname)s %(name)s [%(process)d] %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+            'level': 'INFO',
+        },
+    },
+    'loggers': {
+        'django': {'handlers': ['console'], 'level': 'INFO'},
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'django.template': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'ui': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'agents': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'buho': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+}
 
 logging.getLogger(__name__).debug('Buho settings loaded (debug=%s, allowed_hosts=%s)', DEBUG, ALLOWED_HOSTS)

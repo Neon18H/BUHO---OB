@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AlertsView,
+    AdminUsersView,
     AppDetailView,
     AppsListView,
     LogsExplorerView,
@@ -35,6 +36,7 @@ urlpatterns = [
     path('alerts/', AlertsView.as_view(), name='alerts'),
     path('widgets/create/', WidgetCreateView.as_view(), name='widget_create'),
     path('settings/', SettingsDashboardView.as_view(), name='settings'),
+    path('admin/users/', AdminUsersView.as_view(), name='admin_users'),
     path('settings/users/', SettingsDashboardView.as_view(), name='settings_users'),
     path('settings/users/create/', UserCreateView.as_view(), name='user_create'),
     path('settings/users/<int:user_id>/update/', UserUpdateView.as_view(), name='user_update'),

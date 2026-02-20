@@ -10,7 +10,7 @@
     <a href="?provider=ON_PREM" class="glass p-3">On-Prem</a>
   </div>
   <table class="table-noc"><thead><tr><th>Hostname</th><th>Provider</th><th>Region</th><th>Status</th><th>Last Seen</th><th></th></tr></thead><tbody>
-  {% for server in servers %}<tr><td>{{ server.hostname }}</td><td>{{ server.get_provider_display }}</td><td>{{ server.region|default:'-' }}</td><td><span class="badge-noc {% if server.status == 'ONLINE' %}badge-online{% else %}badge-offline{% endif %}">{{ server.status }}</span></td><td>{{ server.last_seen|date:'Y-m-d H:i' }}</td><td><a href="{% url 'ui:server_detail' server.id %}">View</a></td></tr>{% empty %}<tr><td colspan="6">No telemetry yet — Deploy an agent</td></tr>{% endfor %}
+  {% for server in servers %}<tr><td>{{ server.hostname }}</td><td>{{ server.get_provider_display }}</td><td>{{ server.region|default:'-' }}</td><td><span class="badge-noc {% if server.status == 'ONLINE' %}badge-online{% else %}badge-offline{% endif %}">{{ server.status }}</span></td><td>{{ server.last_seen|date:'Y-m-d H:i' }}</td><td><a href="{% url 'ui:server_detail' server.id %}">View</a></td></tr>{% empty %}<tr><td colspan="6">Waiting for agent telemetry</td></tr>{% endfor %}
   </tbody></table>
 </div>
 {% endblock %}
