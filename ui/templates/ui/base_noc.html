@@ -11,9 +11,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="{% static 'css/buho_noc.css' %}">
   <link rel="stylesheet" href="{% static 'css/buho_components.css' %}">
+  <link rel="stylesheet" href="{% static 'css/buho_auth.css' %}">
   <link rel="stylesheet" href="{% static 'css/buho_effects.css' %}">
 </head>
-<body class="noc-mode noc-grid scanline" x-data="{open:true}">
+<body class="noc-mode noc-grid noc-noise scanline" x-data="{open:true}">
 <div class="layout-shell">
   <aside class="sidebar p-4" :class="open ? 'block' : 'hidden md:block md:w-20'">
     <div class="flex items-center gap-2 mb-6"><span class="text-teal-300">🦉</span><div x-show="open"><p class="font-bold">BUHO</p><p class="text-xs text-slate-400">NOC MODE</p></div></div>
@@ -36,7 +37,9 @@
       <div class="flex items-center gap-3 text-sm">
         {% if active_org %}<span class="badge-noc badge-info">ORG: {{ active_org.name }}</span>{% endif %}
         <form method="get" class="inline"><select name="time_range" onchange="this.form.submit()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1"><option>15m</option><option>1h</option><option>24h</option><option>7d</option></select></form>
-        <span class="badge-noc badge-online">NOC MODE</span>
+        <span class="badge-noc badge-online">ONLINE</span>
+        <span class="badge-noc badge-offline">OFFLINE</span>
+        <span class="badge-noc badge-info">SECURE CHANNEL</span>
         <span class="text-slate-300">{{ request.user.username }}</span>
         <form method="POST" action="{% url 'logout' %}">{% csrf_token %}<button class="btn-danger-noc btn-noc" type="submit">Logout</button></form>
       </div>
