@@ -1,7 +1,0 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-body { background: radial-gradient(circle at 20% 20%, #111b33, #04070f 50%); color: #d4e0ff; }
-.noc-grid { background-image: linear-gradient(rgba(56,189,248,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,.08) 1px, transparent 1px); background-size: 32px 32px; }
-.noc-card { @apply bg-slate-900/70 border border-sky-500/20 rounded-xl p-4 shadow-[0_0_20px_rgba(56,189,248,.15)]; }

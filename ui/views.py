@@ -52,8 +52,7 @@ class BuhoLoginView(LoginView):
 
 
 class BuhoLogoutView(LogoutView):
-    http_method_names = ['post', 'options']
-    next_page = '/auth/login/'
+    next_page = reverse_lazy('accounts:login')
 
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
@@ -67,7 +66,7 @@ class RegisterView(View):
     def dispatch(self, request, *args, **kwargs):
         if Organization.objects.exists():
             messages.info(request, 'El sistema ya fue inicializado. Inicia sesión para continuar.')
-            return redirect('/auth/login/')
+            return redirect('accounts:login')
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request):
