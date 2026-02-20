@@ -1,8 +1,10 @@
 from datetime import timedelta
+import logging
 import secrets
 
 from django.db import connection
 from django.db import transaction
+from django.db.utils import OperationalError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -17,6 +19,25 @@ from agents.threats import ingest_artifacts, ingest_findings
 from audit.models import AuditLog
 from buho.runtime import get_db_label, get_public_base_url
 from soc.models import CorrelatedAlert, DetectionRule, SecurityEvent
+
+logger = logging.getLogger(__name__)
+
+
+def _is_sqlite_locked(exc: Exception) -> bool:
+    return connection.vendor == 'sqlite' and 'locked' in str(exc).lower()
+
+
+def _bulk_create_with_retry(model, rows, batch_size=500):
+    for attempt in range(2):
+        try:
+            model.objects.bulk_create(rows, batch_size=batch_size)
+            return
+        except OperationalError as exc:
+            if attempt == 0 and _is_sqlite_locked(exc):
+                logger.warning('SQLite lock detected on %s, retrying once', model.__name__)
+                continue
+            raise
+
 
 from .serializers import (
     AgentCommandAckSerializer,
@@ -155,7 +176,7 @@ class AgentMetricsIngestApiView(APIView, AgentAuthMixin):
             )
             for item in serializer.validated_data['metrics']
         ]
-        MetricPoint.objects.bulk_create(rows)
+        _bulk_create_with_retry(MetricPoint, rows)
         agent.last_seen = timezone.now()
         agent.status = Agent.Status.ONLINE
         evaluate_metric_incidents(agent.organization, agent)
@@ -191,7 +212,7 @@ class AgentProcessesIngestApiView(APIView, AgentAuthMixin):
             )
             for item in serializer.validated_data['processes']
         ]
-        ProcessSample.objects.bulk_create(rows)
+        _bulk_create_with_retry(ProcessSample, rows)
         agent.last_seen = timezone.now()
         agent.status = Agent.Status.ONLINE
         agent.save(update_fields=['last_seen', 'status'])
@@ -243,12 +264,13 @@ class AgentLogsIngestApiView(APIView, AgentAuthMixin):
                 elif 'yara' in message_low or 'malware' in message_low:
                     event_type, severity = 'yara_match', 'CRITICAL'
                     tags.append('malware')
+                normalized_event_type = event_type or 'log_observation'
+                sec_rows.append(SecurityEvent(organization=agent.organization, agent=agent, ts=ts, source=item.get('source', 'agent'), event_type=normalized_event_type, severity=severity, title=normalized_event_type.replace('_', ' ').title(), message=message, raw_json=item, tags=tags + [normalized_event_type]))
                 if event_type:
-                    sec_rows.append(SecurityEvent(organization=agent.organization, agent=agent, ts=ts, source=item.get('source', 'agent'), event_type=event_type, severity=severity, title=event_type.replace('_', ' ').title(), message=message, raw_json=item, tags=tags + [event_type]))
-                    CorrelatedAlert.objects.create(organization=agent.organization, severity=severity, title=f'Auto alert: {event_type.replace('_', ' ')}', description=message[:500], status=CorrelatedAlert.Status.OPEN)
-            LogEntry.objects.bulk_create(rows)
+                    CorrelatedAlert.objects.create(organization=agent.organization, severity=severity, title=f"Auto alert: {event_type.replace('_', ' ')}", description=message[:500], status=CorrelatedAlert.Status.OPEN)
+            _bulk_create_with_retry(LogEntry, rows)
             if sec_rows:
-                SecurityEvent.objects.bulk_create(sec_rows)
+                _bulk_create_with_retry(SecurityEvent, sec_rows)
         evaluate_log_incidents(agent.organization, agent)
         now = timezone.now()
         for rule in DetectionRule.objects.filter(organization=agent.organization, enabled=True):

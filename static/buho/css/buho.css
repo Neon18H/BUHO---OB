@@ -1,0 +1,24 @@
+:root {
+  --buho-bg: #0b1020;
+  --buho-panel: #0f172a;
+  --buho-border: #27344d;
+  --buho-text: #e5e7eb;
+  --buho-muted: #94a3b8;
+}
+body.buho-body { background: radial-gradient(circle at top, #132038 0%, var(--buho-bg) 45%); color: var(--buho-text); }
+.buho-sidebar { width: 260px; background: #0a0f1e; border-right: 1px solid var(--buho-border); min-height: 100vh; }
+.buho-sidebar .nav-link { color: #cbd5e1; border-radius: .5rem; }
+.buho-sidebar .nav-link:hover, .buho-sidebar .nav-link.active { background: #1e293b; color: #fff; }
+.topbar { background: rgba(2, 6, 23, .82); border-bottom: 1px solid var(--buho-border); backdrop-filter: blur(6px); }
+.content-wrap { min-height: 100vh; }
+.card, .buho-card { background: rgba(15, 23, 42, .92); border: 1px solid var(--buho-border); box-shadow: 0 8px 25px rgba(2, 6, 23, .25); }
+.table { --bs-table-bg: transparent; --bs-table-color: #dbeafe; --bs-table-border-color: #334155; }
+.table-dark { --bs-table-bg: #0e1728; }
+.form-control, .form-select, .input-group-text { background: #0b1220; border-color: #334155; color: #dbeafe; }
+.form-control:focus, .form-select:focus { border-color: #60a5fa; box-shadow: 0 0 0 .2rem rgba(59,130,246,.2); background: #0b1220; color: #fff; }
+.badge-sev-CRITICAL, .badge-sev-CRIT { background: #991b1b; }
+.badge-sev-HIGH, .badge-sev-DANGER { background: #c2410c; }
+.badge-sev-MEDIUM, .badge-sev-WARN, .badge-sev-MED { background: #a16207; }
+.badge-sev-LOW, .badge-sev-INFO { background: #0369a1; }
+.empty-state { border: 1px dashed #334155; border-radius: .75rem; padding: 2rem; text-align: center; color: var(--buho-muted); background: rgba(15,23,42,.45); }
+.kpi-value { font-size: 1.5rem; font-weight: 700; }

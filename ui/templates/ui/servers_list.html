@@ -1,4 +1,4 @@
-{% extends 'ui/base_noc.html' %}
+{% extends 'ui/base_console.html' %}
 {% block breadcrumbs %}Infrastructure / Servers{% endblock %}
 {% block content %}
 <div class="card buho-card mb-3"><div class="card-body"><form class="row g-2"><div class="col-md-4"><select name="provider" class="form-select"><option value="">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="GCP">GCP</option><option value="RAILWAY">Railway</option><option value="ON_PREM">On-Prem</option></select></div><div class="col-md-4"><select name="status" class="form-select"><option value="">All status</option><option value="ONLINE">ONLINE</option><option value="OFFLINE">OFFLINE</option><option value="DEGRADED">DEGRADED</option></select></div><div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div></form></div></div>

@@ -1,9 +1,5 @@
-{% extends 'ui/base_noc.html' %}
-{% block breadcrumbs %}Error{% endblock %}
+{% extends 'ui/base_console.html' %}
+{% block title %}Error interno{% endblock %}
 {% block content %}
-<div class="glass p-6">
-  <h1 class="text-2xl mb-2">Unexpected error</h1>
-  <p class="text-slate-300">Something went wrong. Please contact support with this Error ID:</p>
-  <p class="text-teal-300 font-mono text-lg mt-2">{{ error_id }}</p>
-</div>
+<div class="empty-state"><i class="bi bi-bug me-1"></i> Error interno. ID: <code>{{ error_id|default:'unknown' }}</code></div>
 {% endblock %}

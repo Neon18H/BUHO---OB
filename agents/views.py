@@ -942,7 +942,10 @@ class TokensView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 
     def get(self, request):
         tokens = self.scoped_tokens(request)
-        create_audit_log(request=request, actor=request.user, action='VIEW_TOKENS', target_type='AgentEnrollmentToken', metadata={'count': tokens.count()})
+        try:
+            create_audit_log(request=request, actor=request.user, action='VIEW_TOKENS', target_type='AgentEnrollmentToken', metadata={'count': tokens.count()})
+        except Exception as exc:
+            logger.warning('Audit log failed for tokens view user=%s: %s', request.user.id, exc)
         return render(request, 'agents/tokens.html', {'tokens': tokens, 'form': TokenCreateForm()})
 
 
@@ -973,15 +976,18 @@ class TokenCreateView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             tags_json=form.get_tags(),
             allow_multi_use=form.cleaned_data['allow_multi_use'],
         )
-        create_audit_log(
-            request=request,
-            actor=request.user,
-            action='CREATE_TOKEN',
-            target_type='AgentEnrollmentToken',
-            target_id=str(token.id),
-            organization=org,
-            metadata={'token_preview': token.masked_token, 'expires_at': token.expires_at.isoformat()},
-        )
+        try:
+            create_audit_log(
+                request=request,
+                actor=request.user,
+                action='CREATE_TOKEN',
+                target_type='AgentEnrollmentToken',
+                target_id=str(token.id),
+                organization=org,
+                metadata={'token_preview': token.masked_token, 'expires_at': token.expires_at.isoformat()},
+            )
+        except Exception as exc:
+            logger.warning('Audit log failed for token create user=%s: %s', request.user.id, exc)
         messages.success(request, 'Installation token created.')
         return redirect(request.META.get('HTTP_REFERER', 'agents:tokens'))
 
@@ -995,15 +1001,18 @@ class TokenRevokeView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         token = get_object_or_404(self.scoped_tokens(request), id=token_id)
         token.is_revoked = True
         token.save(update_fields=['is_revoked'])
-        create_audit_log(
-            request=request,
-            actor=request.user,
-            action='REVOKE_TOKEN',
-            target_type='AgentEnrollmentToken',
-            target_id=str(token.id),
-            organization=token.organization,
-            metadata={'token_preview': token.masked_token},
-        )
+        try:
+            create_audit_log(
+                request=request,
+                actor=request.user,
+                action='REVOKE_TOKEN',
+                target_type='AgentEnrollmentToken',
+                target_id=str(token.id),
+                organization=token.organization,
+                metadata={'token_preview': token.masked_token},
+            )
+        except Exception as exc:
+            logger.warning('Audit log failed for token revoke user=%s: %s', request.user.id, exc)
         messages.success(request, 'Token revoked.')
         return redirect('agents:tokens')
 

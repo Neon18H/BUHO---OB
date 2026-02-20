@@ -1,7 +1,8 @@
 import logging
 import uuid
 
-from django.shortcuts import redirect
+from django.conf import settings
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.deprecation import MiddlewareMixin
 
@@ -32,10 +33,13 @@ class OnboardingRequiredMiddleware(MiddlewareMixin):
 
 
 class ExceptionLoggingMiddleware(MiddlewareMixin):
-    """Generate traceable error IDs for unexpected exceptions."""
+    """Generate traceable error IDs and render a consistent 500 page."""
 
     def process_exception(self, request, exception):
         error_id = uuid.uuid4().hex[:12]
         request.error_id = error_id
-        logger.exception('Unhandled application error id=%s path=%s', error_id, request.path)
-        return None
+        logger.exception('[ERROR_ID=%s] Unhandled application error path=%s', error_id, request.path, extra={'error_id': error_id})
+
+        if settings.DEBUG:
+            return None
+        return render(request, 'ui/error_500.html', {'error_id': error_id}, status=500)
