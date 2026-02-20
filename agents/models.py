@@ -160,6 +160,7 @@ class Incident(models.Model):
         LOG_ERROR_FLOOD = 'LOG_ERROR_FLOOD', 'Error logs flood'
         AGENT_OFFLINE = 'AGENT_OFFLINE', 'Agent heartbeat missing'
         HTTP_5XX_SPIKE = 'HTTP_5XX_SPIKE', 'HTTP 5xx spike'
+        MALWARE_SUSPECT = 'MALWARE_SUSPECT', 'Malware suspect (YARA/VT)'
 
     class Severity(models.TextChoices):
         LOW = 'LOW', 'Low'
@@ -226,17 +227,22 @@ class AppServiceMap(models.Model):
 
 class AgentCommand(models.Model):
     class CommandType(models.TextChoices):
+        NIGHT_SCAN = 'NIGHT_SCAN', 'Night scan'
+        QUARANTINE_FILE = 'QUARANTINE_FILE', 'Quarantine file'
+        KILL_PROCESS = 'KILL_PROCESS', 'Kill process'
+        UPDATE_CONFIG = 'UPDATE_CONFIG', 'Update config'
         START_NOCTURNAL_SCAN = 'START_NOCTURNAL_SCAN', 'Start nocturnal scan'
         STOP_NOCTURNAL_SCAN = 'STOP_NOCTURNAL_SCAN', 'Stop nocturnal scan'
         SET_NOCTURNAL_CONFIG = 'SET_NOCTURNAL_CONFIG', 'Set nocturnal config'
 
     class Status(models.TextChoices):
         PENDING = 'PENDING', 'Pending'
+        RUNNING = 'RUNNING', 'Running'
+        DONE = 'DONE', 'Done'
+        FAILED = 'FAILED', 'Failed'
         SENT = 'SENT', 'Sent'
         ACKED = 'ACKED', 'Acked'
-        RUNNING = 'RUNNING', 'Running'
         COMPLETED = 'COMPLETED', 'Completed'
-        FAILED = 'FAILED', 'Failed'
         CANCELED = 'CANCELED', 'Canceled'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -248,6 +254,10 @@ class AgentCommand(models.Model):
     issued_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    result_json = models.JSONField(default=dict, blank=True)
+    error_text = models.TextField(blank=True)
 
     class Meta:
         ordering = ('-created_at',)
@@ -319,5 +329,56 @@ class HashReputationCache(models.Model):
     last_checked = models.DateTimeField(default=timezone.now)
     expires_at = models.DateTimeField()
 
+
+class AgentConfig(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='agent_configs')
+    agent = models.OneToOneField(Agent, on_delete=models.CASCADE, related_name='config')
+    scan_paths = models.JSONField(default=list, blank=True)
+    exclusions = models.JSONField(default=list, blank=True)
+    max_files = models.PositiveIntegerField(default=2000)
+    max_file_mb = models.PositiveIntegerField(default=30)
+    yara_ruleset_url = models.URLField(blank=True)
+    yara_rules_inline = models.TextField(blank=True)
+    vt_enabled = models.BooleanField(default=False)
+    vt_api_key_masked = models.CharField(max_length=255, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ThreatFinding(models.Model):
+    class Severity(models.TextChoices):
+        LOW = 'LOW', 'Low'
+        MED = 'MED', 'Medium'
+        HIGH = 'HIGH', 'High'
+        CRIT = 'CRIT', 'Critical'
+
+    class Status(models.TextChoices):
+        OPEN = 'OPEN', 'Open'
+        ACK = 'ACK', 'Ack'
+        RESOLVED = 'RESOLVED', 'Resolved'
+
+    class ActionTaken(models.TextChoices):
+        NONE = 'NONE', 'None'
+        QUARANTINED = 'QUARANTINED', 'Quarantined'
+        KILLED = 'KILLED', 'Killed'
+        IGNORED = 'IGNORED', 'Ignored'
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='threat_findings')
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='threat_findings')
+    server = models.ForeignKey(DetectedApp, on_delete=models.SET_NULL, null=True, blank=True, related_name='threat_findings')
+    created_at = models.DateTimeField(default=timezone.now)
+    severity = models.CharField(max_length=8, choices=Severity.choices, default=Severity.MED)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    file_path = models.TextField()
+    file_hash_sha256 = models.CharField(max_length=64, blank=True, null=True)
+    yara_rule = models.TextField(blank=True)
+    yara_tags = models.JSONField(default=list, blank=True)
+    vt_score = models.IntegerField(null=True, blank=True)
+    vt_permalink = models.TextField(blank=True, null=True)
+    action_taken = models.CharField(max_length=16, choices=ActionTaken.choices, default=ActionTaken.NONE)
+    quarantine_path = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+
     class Meta:
-        ordering = ('-last_checked',)
+        ordering = ('-created_at',)
+        indexes = [models.Index(fields=['organization', 'agent', 'severity', 'status', 'created_at'])]
+
