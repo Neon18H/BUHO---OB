@@ -1,16 +1,18 @@
 import json
-import secrets
 from datetime import timedelta
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login as auth_login
+from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.views import LoginView, LogoutView
 from django.db.models import Avg, Count, Max, Q, Sum
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from django.views import View
 
 from accounts.forms import InitialRegistrationForm, OrganizationForm, OrganizationUserCreateForm, OrganizationUserUpdateForm
@@ -63,12 +65,6 @@ class BuhoLogoutView(LogoutView):
 
 class RegisterView(View):
     template_name = 'auth/register.html'
-
-    def dispatch(self, request, *args, **kwargs):
-        if Organization.objects.exists():
-            messages.info(request, 'El sistema ya fue inicializado. Inicia sesión para continuar.')
-            return redirect('accounts:login')
-        return super().dispatch(request, *args, **kwargs)
 
     def get(self, request):
         return render(request, self.template_name, {'form': InitialRegistrationForm()})
@@ -324,8 +320,27 @@ class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
 
     def get(self, request, server_id):
         org = self.get_org(request)
-        server = get_object_or_404(Agent.objects.filter(organization=org), id=server_id)
-        return render(request, 'ui/server_detail.html', {'server': server})
+        if not org:
+            messages.info(request, 'Primero completa el onboarding de tu organización.')
+            return redirect('auth_register')
+
+        server = get_object_or_404(Agent, pk=server_id, organization=org)
+        latest_metric = MetricPoint.objects.filter(agent=server).order_by('-ts').first()
+        latest_log = LogEntry.objects.filter(agent=server).order_by('-ts').first()
+        latest_process = ProcessSample.objects.filter(agent=server).order_by('-ts').first()
+        server_tabs = ['metrics', 'processes', 'apps', 'logs', 'health']
+        return render(
+            request,
+            'ui/server_detail.html',
+            {
+                'server': server,
+                'server_tabs': server_tabs,
+                'latest_metric': latest_metric,
+                'latest_log': latest_log,
+                'latest_process': latest_process,
+                'no_data_message': 'Waiting for agent telemetry',
+            },
+        )
 
 
 class AppsListView(RoleRequiredMixin, OrgScopedMixin, View):
@@ -433,6 +448,21 @@ class SettingsDashboardView(RoleRequiredMixin, View):
         return render(request, 'ui/settings.html', context)
 
 
+class AdminUsersView(SettingsDashboardView):
+    allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'VIEWER'}
+    template_name = 'ui/admin_users.html'
+
+    def get(self, request):
+        context = {
+            'users': self.get_user_queryset(request),
+            'organizations': self.get_org_queryset(request),
+            'create_form': OrganizationUserCreateForm(),
+            'org_form': OrganizationForm(),
+            'is_admin_users_page': True,
+        }
+        return render(request, self.template_name, context)
+
+
 class UserCreateView(RoleRequiredMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN'}
 
@@ -525,9 +555,9 @@ class UserResetPasswordView(RoleRequiredMixin, View):
         if request.user.role == User.Role.ORG_ADMIN and target.role == User.Role.SUPERADMIN:
             messages.error(request, 'ORG_ADMIN no puede resetear a un SUPERADMIN.')
             return redirect('ui:settings')
-        temp_password = secrets.token_urlsafe(10)
-        target.set_password(temp_password)
-        target.save(update_fields=['password'])
+        uidb64 = urlsafe_base64_encode(force_bytes(target.pk))
+        token = default_token_generator.make_token(target)
+        reset_link = request.build_absolute_uri(reverse('auth_reset_confirm', kwargs={'uidb64': uidb64, 'token': token}))
         create_audit_log(
             request=request,
             actor=request.user,
@@ -537,8 +567,8 @@ class UserResetPasswordView(RoleRequiredMixin, View):
             organization=target.organization,
             metadata={'username': target.username},
         )
-        messages.success(request, f'Password temporal para {target.username}: {temp_password}')
-        return redirect('ui:settings')
+        messages.success(request, f'Link de reset para {target.username}: {reset_link}')
+        return redirect('ui:admin_users')
 
 
 class OrganizationUpdateView(RoleRequiredMixin, View):
