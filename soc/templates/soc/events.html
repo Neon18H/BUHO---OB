@@ -1,0 +1,6 @@
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}SOC / Events{% endblock %}
+{% block content %}
+<form class="console-card p-3 mb-3 flex gap-2"><input name="q" value="{{ q }}" placeholder="query bar" class="bg-slate-900 border border-slate-700 rounded px-2 py-1"><select name="severity" class="bg-slate-900 border border-slate-700 rounded px-2 py-1"><option value="">All severities</option><option value="LOW">LOW</option><option value="MEDIUM">MEDIUM</option><option value="HIGH">HIGH</option><option value="CRITICAL">CRITICAL</option></select><button class="px-3 py-1 bg-cyan-700 rounded">Filter</button></form>
+<table class="w-full text-sm console-card p-2"><thead><tr><th>TS</th><th>Severity</th><th>Type</th><th>Title</th><th>Message</th></tr></thead><tbody>{% for e in events %}<tr><td>{{ e.ts }}</td><td>{{ e.severity }}</td><td>{{ e.event_type }}</td><td>{{ e.title }}</td><td>{{ e.message }}</td></tr>{% empty %}<tr><td colspan="5">No security events.</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

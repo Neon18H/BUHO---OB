@@ -1,0 +1,14 @@
+{% extends 'ui/base_noc.html' %}
+{% block breadcrumbs %}SOC / Rules{% endblock %}
+{% block content %}
+{% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}
+<form method="post" class="console-card p-3 mb-3 grid md:grid-cols-5 gap-2">{% csrf_token %}
+  <input name="name" placeholder="Rule name" class="bg-slate-900 border border-slate-700 rounded px-2 py-1">
+  <input name="contains" placeholder="contains" class="bg-slate-900 border border-slate-700 rounded px-2 py-1">
+  <select name="severity" class="bg-slate-900 border border-slate-700 rounded px-2 py-1"><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select>
+  <input name="threshold" type="number" value="1" class="bg-slate-900 border border-slate-700 rounded px-2 py-1">
+  <button class="bg-cyan-700 rounded px-3 py-1">Crear regla</button>
+</form>
+{% endif %}
+<table class="w-full text-sm console-card p-2"><thead><tr><th>Name</th><th>Enabled</th><th>Severity</th><th>Threshold</th></tr></thead><tbody>{% for r in rules %}<tr><td>{{ r.name }}</td><td>{{ r.enabled }}</td><td>{{ r.severity }}</td><td>{{ r.threshold }}</td></tr>{% empty %}<tr><td colspan="4">No rules.</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

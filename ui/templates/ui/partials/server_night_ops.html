@@ -1,0 +1,5 @@
+<div class="space-y-3">
+  <form method="post" action="{% url 'agents:detail' server.id %}">{% csrf_token %}<input type="hidden" name="action" value="run_night_scan"><button class="px-3 py-2 rounded bg-cyan-700">Iniciar Acción Nocturna</button></form>
+  <p class="text-sm">Estado: {{ latest_nocturnal_run.status|default:'PENDING' }}</p>
+  <table class="w-full text-sm"><thead><tr><th>Severity</th><th>Title</th><th>Status</th></tr></thead><tbody>{% for f in recent_findings %}<tr><td>{{ f.severity }}</td><td>{{ f.title }}</td><td>{{ f.status }}</td></tr>{% empty %}<tr><td colspan="3">Sin hallazgos de Night Ops.</td></tr>{% endfor %}</tbody></table>
+</div>

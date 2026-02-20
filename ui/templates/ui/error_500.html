@@ -1,0 +1,9 @@
+{% extends 'ui/base_noc.html' %}
+{% block title %}Unexpected error{% endblock %}
+{% block content %}
+<div class="console-card p-8 max-w-2xl mx-auto text-center">
+  <h1 class="text-2xl mb-2">Unexpected error</h1>
+  <p class="text-slate-300">An internal exception occurred. Please contact support with this Error ID.</p>
+  <p class="mt-4 text-cyan-300 font-mono">{{ error_id }}</p>
+</div>
+{% endblock %}

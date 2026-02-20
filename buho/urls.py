@@ -19,4 +19,5 @@ urlpatterns = [
     path('threats/overview', ThreatsOverviewView.as_view(), name='threats_overview'),
     path('logout/', BuhoLogoutView.as_view(), name='logout'),
     path('api/', include('api.urls')),
+    path('soc/', include(('soc.urls', 'soc'), namespace='soc')),
 ]

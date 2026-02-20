@@ -817,6 +817,7 @@ class AgentsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
     require_organization = True
+    missing_organization_redirect_url = 'auth_register'
 
     def post(self, request, agent_id):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
@@ -900,7 +901,7 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
         vt_available = bool(cfg.vt_api_key_masked)
         return render(request, 'agents/detail.html', {
             'agent': agent,
-            'agent_tabs': ['metrics', 'apps', 'processes', 'logs', 'alerts', 'threats'],
+            'agent_tabs': ['metrics', 'processes', 'apps', 'logs', 'health', 'night-ops'],
             'heartbeats': agent.heartbeats.all()[:20],
             'apps': apps,
             'labels': labels,
@@ -929,6 +930,7 @@ class AgentDetailView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
 class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
     require_organization = True
+    missing_organization_redirect_url = 'auth_register'
 
     def get(self, request, agent_id, tab):
         agent = get_object_or_404(self.scoped_agents(request), id=agent_id)
@@ -937,8 +939,8 @@ class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             'apps': 'agents/partials/agent_apps.html',
             'processes': 'agents/partials/agent_processes.html',
             'logs': 'agents/partials/agent_logs.html',
-            'alerts': 'agents/partials/agent_alerts.html',
-            'threats': 'agents/partials/agent_threats_tab.html',
+            'health': 'agents/partials/agent_health.html',
+            'night-ops': 'agents/partials/agent_night_ops.html',
         }
         template = tabs.get(tab)
         if not template:
@@ -962,10 +964,12 @@ class AgentDetailTabView(RoleRequiredUIMixin, AgentOrganizationMixin, View):
             context['processes'] = ProcessSample.objects.filter(agent=agent, ts=latest).order_by('-cpu','-mem')[:100] if latest else []
         elif tab == 'logs':
             context['logs'] = LogEntry.objects.filter(agent=agent).order_by('-ts')[:200]
-        elif tab == 'alerts':
+        elif tab == 'health':
             context['incidents'] = Incident.objects.filter(agent=agent).order_by('-created_at')[:120]
-        elif tab == 'threats':
+        elif tab == 'night-ops':
             context['findings'] = ThreatFinding.objects.filter(agent=agent).order_by('-created_at')[:120]
+            context['latest_nocturnal_run'] = AgentCommand.objects.filter(agent=agent, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first()
+            context['agent_config'], _ = AgentConfig.objects.get_or_create(organization=agent.organization, agent=agent, defaults={'scan_paths': ['C:\\Users', 'C:\\ProgramData'] if 'win' in (agent.os or '').lower() else ['/home', '/var/www'], 'exclusions': ['venv', '.git', 'node_modules']})
             context['vt_available'] = bool(getattr(getattr(agent, 'config', None), 'vt_api_key_masked', ''))
         return render(request, template, context)
 class ThreatsOverviewView(RoleRequiredUIMixin, AgentOrganizationMixin, View):

@@ -1,0 +1,1 @@
+<table class="w-full text-sm"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>MEM</th></tr></thead><tbody>{% for p in processes %}<tr><td>{{ p.pid }}</td><td>{{ p.name }}</td><td>{{ p.cpu }}</td><td>{{ p.mem }}</td></tr>{% empty %}<tr><td colspan="4">No process samples.</td></tr>{% endfor %}</tbody></table>
