@@ -1,33 +1,4 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
 {% block content %}
-<h1 class="h4 mb-3">Apps detectadas</h1>
-<form class="row g-2 mb-3" method="get">
-  <div class="col-md-3"><select class="form-select" name="provider"><option value="">Provider</option>{% for key,label in providers %}<option value="{{ key }}" {% if filters.provider == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-  <div class="col-md-3"><select class="form-select" name="env"><option value="">Environment</option>{% for key,label in envs %}<option value="{{ key }}" {% if filters.env == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-  <div class="col-md-4"><select class="form-select" name="agent"><option value="">Agente</option>{% for ag in agents %}<option value="{{ ag.id }}" {% if filters.agent == ag.id|stringformat:'s' %}selected{% endif %}>{{ ag.name }}</option>{% endfor %}</select></div>
-  <div class="col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
-</form>
-<div class="card table-card">
-  <div class="table-responsive sticky-table">
-    <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>App</th><th>Tipo</th><th>Runtime</th><th>Framework</th><th>Provider</th><th>Host</th><th>Health</th><th>Última vez</th></tr></thead>
-      <tbody>
-        {% for app in apps %}
-        <tr>
-          <td><a href="{% url 'ui:app_detail' app.id %}">{{ app.name }}</a></td>
-          <td>{{ app.kind }}</td>
-          <td>{{ app.runtime|default:'-' }}</td>
-          <td>{{ app.framework|default:'-' }}</td>
-          <td>{{ app.agent.get_provider_display }}</td>
-          <td>{{ app.agent.hostname }}</td>
-          <td>{{ app.app_health_score }}</td>
-          <td>{{ app.last_seen|date:'Y-m-d H:i:s' }}</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="8">Sin apps detectadas todavía.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+<div id="app-root" data-page="apps"></div>
 {% endblock %}

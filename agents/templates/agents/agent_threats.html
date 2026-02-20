@@ -1,12 +1,4 @@
-{% extends 'ui/base.html' %}
+{% extends 'ui/base_noc.html' %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Threats · {{ agent.name }}</h1>
-  <a class="btn btn-outline-secondary" href="{% url 'agents:detail' agent.id %}">Back to agent</a>
-</div>
-<div class="card p-3">
-  <table class="table table-sm"><thead><tr><th>Severity</th><th>Category</th><th>Title</th><th>Status</th><th>Last seen</th></tr></thead><tbody>
-    {% for finding in findings %}<tr><td>{{ finding.severity }}</td><td>{{ finding.category }}</td><td>{{ finding.title }}</td><td>{{ finding.status }}</td><td>{{ finding.last_seen|date:'Y-m-d H:i:s' }}</td></tr>{% empty %}<tr><td colspan="5">No findings</td></tr>{% endfor %}
-  </tbody></table>
-</div>
+<div id="app-root" data-page="threats" data-agent-id="{{ agent.id }}"></div>
 {% endblock %}
