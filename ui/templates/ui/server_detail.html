@@ -1,12 +1,27 @@
 {% extends 'ui/base_noc.html' %}
 {% block breadcrumbs %}Infrastructure / Servers / {{ server.hostname }}{% endblock %}
 {% block content %}
-<div x-data="{tab:'metrics'}" class="space-y-4">
-  <div class="console-card p-4 flex justify-between">
-    <div><h1 class="text-xl">{{ server.hostname }}</h1><p class="text-slate-400 text-sm">Server Health · uptime inferred by heartbeats · last heartbeat {{ server.last_seen|date:'Y-m-d H:i:s' }}</p></div>
-    <div>{% if server.status == 'ONLINE' %}<span class="console-badge console-badge-ok">ONLINE</span>{% else %}<span class="console-badge console-badge-bad">OFFLINE</span>{% endif %}<span class="console-badge" style="background:#1e293b">{{ server.get_provider_display }}</span></div>
-  </div>
-  <div class="flex flex-wrap gap-2">{% for t in server_tabs %}<button class="console-tab" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'ui:server_detail_tab' server.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#server-tab'})">{{ t|title }}</button>{% endfor %}</div>
-  <div id="server-tab" class="console-card p-4" hx-get="{% url 'ui:server_detail_tab' server.id 'metrics' %}" hx-trigger="load"></div>
+<div class="card buho-card mb-3"><div class="card-body d-flex justify-content-between align-items-center"><div><h4 class="mb-1">{{ server.hostname }}</h4><small class="text-secondary">Last heartbeat {{ server.last_seen|date:'Y-m-d H:i:s' }}</small></div><span class="badge {% if server.status == 'ONLINE' %}text-bg-success{% else %}text-bg-danger{% endif %}">{{ server.status }}</span></div></div>
+<ul class="nav nav-tabs" id="serverTab" role="tablist">
+  <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#metrics">Metrics</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#processes">Processes</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#apps">Apps</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#logs">Logs</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#health">Health</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#night">Night Ops</button></li>
+</ul>
+<div class="tab-content card buho-card border-top-0 p-3">
+<div class="tab-pane fade show active" id="metrics">
+  <div class="row g-3 mb-3">{% for key,val in kpis.items %}<div class="col-md-2"><div class="card buho-card"><div class="card-body"><small class="text-secondary">{{ key|upper }}</small><div class="kpi-value">{% if val != None %}{{ val|floatformat:2 }}{% else %}--{% endif %}</div></div></div></div>{% endfor %}</div>
+  {% if labels %}<div class="row g-3"><div class="col-lg-6"><canvas id="serverCpuRam"></canvas></div><div class="col-lg-6"><canvas id="serverDiskNet"></canvas></div></div>{% else %}<div class="empty-state">Waiting for telemetry for this server.</div>{% endif %}
 </div>
+<div class="tab-pane fade" id="processes">{% if processes %}<table class="table table-sm" data-datatable="true"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>RAM</th></tr></thead><tbody>{% for p in processes %}<tr><td>{{p.pid}}</td><td>{{p.name}}</td><td>{{p.cpu}}</td><td>{{p.mem}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">No process samples yet.</div>{% endif %}</div>
+<div class="tab-pane fade" id="apps">{% if apps %}<div class="row g-3">{% for a in apps %}<div class="col-md-4"><div class="card buho-card"><div class="card-body"><h6>{{a.name}}</h6><small class="text-secondary">{{a.runtime|default:'unknown'}} · {{a.framework|default:'-'}}</small></div></div></div>{% endfor %}</div>{% else %}<div class="empty-state">No apps detected on this server.</div>{% endif %}</div>
+<div class="tab-pane fade" id="logs"><form class="row g-2 mb-2"><div class="col-md-3"><select name="level" class="form-select"><option value="">All levels</option><option value="INFO">INFO</option><option value="WARN">WARN</option><option value="ERROR">ERROR</option></select></div><div class="col-md-6"><input class="form-control" name="contains" placeholder="contains"></div><div class="col-md-2"><button class="btn btn-primary">Filter</button></div></form>{% if logs %}<table class="table table-sm" data-datatable="true"><thead><tr><th>TS</th><th>Level</th><th>Message</th></tr></thead><tbody>{% for l in logs %}<tr><td>{{l.ts}}</td><td><span class="badge badge-sev-{{l.level}}">{{l.level}}</span></td><td>{{l.message}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">No logs for this server.</div>{% endif %}</div>
+<div class="tab-pane fade" id="health"><p>Health score: {{ server.health_score }}</p><p>Uptime inferred from heartbeats. Last heartbeat: {{ server.last_seen|date:'Y-m-d H:i:s' }}</p>{% if incidents %}<table class="table table-sm"><thead><tr><th>Type</th><th>Severity</th><th>Status</th></tr></thead><tbody>{% for i in incidents %}<tr><td>{{i.type}}</td><td>{{i.severity}}</td><td>{{i.status}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">No health checks/incidents.</div>{% endif %}</div>
+<div class="tab-pane fade" id="night"><form method="post" action="{% url 'agents:detail' server.id %}">{% csrf_token %}<input type="hidden" name="action" value="run_night_scan"><button class="btn btn-warning mb-3">Iniciar Acción Nocturna</button></form>{% if recent_findings %}<table class="table table-sm"><thead><tr><th>Severity</th><th>Title</th><th>Status</th></tr></thead><tbody>{% for f in recent_findings %}<tr><td><span class="badge badge-sev-{{f.severity}}">{{f.severity}}</span></td><td>{{f.title}}</td><td>{{f.status}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">Sin hallazgos Night Ops.</div>{% endif %}</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+if ({{ labels|length }} > 0) {
+new Chart(document.getElementById('serverCpuRam'),{type:'line',data:{labels:{{ labels|safe }},datasets:[{label:'CPU',data:{{ series.cpu|safe }},borderColor:'#60a5fa'},{label:'RAM',data:{{ series.ram|safe }},borderColor:'#34d399'}]}});
+new Chart(document.getElementById('serverDiskNet'),{type:'line',data:{labels:{{ labels|safe }},datasets:[{label:'Disk',data:{{ series.disk|safe }},borderColor:'#f59e0b'},{label:'Net Out',data:{{ series.net_out|safe }},borderColor:'#a855f7'}]}});
+}
+</script>
 {% endblock %}

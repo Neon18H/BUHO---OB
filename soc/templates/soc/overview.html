@@ -1,9 +1,11 @@
 {% extends 'ui/base_noc.html' %}
 {% block breadcrumbs %}SOC / Overview{% endblock %}
 {% block content %}
-<div class="grid md:grid-cols-4 gap-3">
-  <div class="console-card p-4"><p class="text-xs text-slate-400">Events 24h</p><p class="text-2xl">{{ events_24h }}</p></div>
-  <div class="console-card p-4"><p class="text-xs text-slate-400">EPS</p><p class="text-2xl">{{ eps }}</p></div>
-</div>
-<div class="console-card p-4 mt-4"><h3>Top agents</h3>{% for a in top_agents %}<div>{{ a.agent__hostname|default:'Unknown' }} · {{ a.total }}</div>{% empty %}No data{% endfor %}</div>
+<div class="row g-3 mb-3"><div class="col-md-3"><div class="card buho-card"><div class="card-body"><small class="text-secondary">Events 24h</small><div class="kpi-value">{{ events_24h }}</div></div></div></div><div class="col-md-3"><div class="card buho-card"><div class="card-body"><small class="text-secondary">EPS aprox</small><div class="kpi-value">{{ eps }}</div></div></div></div>{% for s in top_severities|slice:":2" %}<div class="col-md-3"><div class="card buho-card"><div class="card-body"><small class="text-secondary">{{ s.severity }}</small><div class="kpi-value">{{ s.total }}</div></div></div></div>{% endfor %}</div>
+<div class="row g-3"><div class="col-lg-6"><div class="card buho-card p-3"><h6>Severity by hour</h6><canvas id="socSevHour"></canvas></div></div><div class="col-lg-6"><div class="card buho-card p-3"><h6>Top event types</h6><canvas id="socTypes"></canvas></div></div></div>
+<div class="card buho-card mt-3"><div class="card-header">Top agents</div><div class="card-body">{% for a in top_agents %}<span class="badge text-bg-dark me-2">{{ a.agent__hostname|default:'Unknown' }}: {{ a.total }}</span>{% empty %}<div class="empty-state">Waiting for telemetry…</div>{% endfor %}</div></div>
 {% endblock %}
+{% block scripts %}<script>
+new Chart(document.getElementById('socSevHour'),{type:'bar',data:{labels:{{ sev_labels|safe }},datasets:[{label:'Events',data:{{ sev_values|safe }},backgroundColor:'#3b82f6'}]}});
+new Chart(document.getElementById('socTypes'),{type:'doughnut',data:{labels:{{ type_labels|safe }},datasets:[{data:{{ type_values|safe }}}]}});
+</script>{% endblock %}

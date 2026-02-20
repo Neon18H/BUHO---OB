@@ -318,6 +318,18 @@ class ServersListView(RoleRequiredMixin, OrgScopedMixin, View):
 class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
     allowed_roles = {'SUPERADMIN', 'ORG_ADMIN', 'ANALYST', 'VIEWER'}
 
+    def _series(self, server, metric_names):
+        points = MetricPoint.objects.filter(agent=server, name__in=metric_names).order_by('-ts')[:600]
+        grouped = {}
+        for point in reversed(list(points)):
+            key = point.ts.replace(second=0, microsecond=0)
+            grouped.setdefault(key, {})[point.name] = point.value
+        labels = [ts.strftime('%H:%M') for ts in grouped.keys()][-60:]
+        values = {}
+        for metric in metric_names:
+            values[metric] = [grouped[ts].get(metric, 0) for ts in list(grouped.keys())[-60:]]
+        return labels, values
+
     def get(self, request, server_id):
         org = self.get_org(request)
         if not org:
@@ -325,24 +337,38 @@ class ServerDetailView(RoleRequiredMixin, OrgScopedMixin, View):
             return redirect('auth_register')
 
         server = get_object_or_404(Agent, pk=server_id, organization=org)
-        latest_metric = MetricPoint.objects.filter(agent=server).order_by('-ts').first()
-        latest_log = LogEntry.objects.filter(agent=server).order_by('-ts').first()
-        latest_process = ProcessSample.objects.filter(agent=server).order_by('-ts').first()
-        server_tabs = ['metrics', 'processes', 'apps', 'logs', 'health', 'night-ops']
-        return render(
-            request,
-            'ui/server_detail.html',
-            {
-                'server': server,
-                'server_tabs': server_tabs,
-                'latest_metric': latest_metric,
-                'latest_log': latest_log,
-                'latest_process': latest_process,
-                'no_data_message': 'Waiting for agent telemetry',
+        metric_names = ['cpu.percent', 'mem.percent', 'disk.root.used_percent', 'net.bytes_sent', 'net.bytes_recv', 'gpu.percent']
+        labels, series = self._series(server, metric_names)
+        latest = {name: MetricPoint.objects.filter(agent=server, name=name).order_by('-ts').first() for name in metric_names}
+        latest_process_ts = ProcessSample.objects.filter(agent=server).order_by('-ts').values_list('ts', flat=True).first()
+        processes = ProcessSample.objects.filter(agent=server, ts=latest_process_ts).order_by('-cpu', '-mem')[:20] if latest_process_ts else []
+        logs = LogEntry.objects.filter(agent=server).order_by('-ts')[:200]
+        level = request.GET.get('level','')
+        contains = request.GET.get('contains','').strip()
+        if level:
+            logs = logs.filter(level=level)
+        if contains:
+            logs = logs.filter(message__icontains=contains)
+        return render(request, 'ui/server_detail.html', {
+            'server': server,
+            'server_tabs': ['metrics', 'processes', 'apps', 'logs', 'health', 'night-ops'],
+            'labels': labels,
+            'series': {'cpu': series.get('cpu.percent', []), 'ram': series.get('mem.percent', []), 'disk': series.get('disk.root.used_percent', []), 'net_out': series.get('net.bytes_sent', []), 'net_in': series.get('net.bytes_recv', []), 'gpu': series.get('gpu.percent', [])},
+            'kpis': {
+                'cpu': latest['cpu.percent'].value if latest['cpu.percent'] else None,
+                'ram': latest['mem.percent'].value if latest['mem.percent'] else None,
+                'disk': latest['disk.root.used_percent'].value if latest['disk.root.used_percent'] else None,
+                'net': latest['net.bytes_sent'].value if latest['net.bytes_sent'] else None,
+                'gpu': latest['gpu.percent'].value if latest['gpu.percent'] else None,
             },
-        )
-
-
+            'processes': processes,
+            'apps': DetectedApp.objects.filter(agent=server).order_by('-last_seen')[:100],
+            'logs': logs,
+            'log_filter': {'level': level, 'contains': contains},
+            'incidents': Incident.objects.filter(agent=server).order_by('-created_at')[:50],
+            'latest_nocturnal_run': AgentCommand.objects.filter(agent=server, command_type=AgentCommand.CommandType.NIGHT_SCAN).order_by('-created_at').first(),
+            'recent_findings': SecurityFinding.objects.filter(agent=server).order_by('-last_seen')[:60],
+        })
 
 
 class ServerDetailTabView(RoleRequiredMixin, OrgScopedMixin, View):
@@ -518,7 +544,7 @@ class UserCreateView(RoleRequiredMixin, View):
             )
             messages.success(request, f'User {user.username} created.')
         else:
-            messages.error(request, f'Error creating user: {form.errors.as_text()}')
+            messages.error(request, 'Error creating user. Revisa los campos del formulario.')
         return redirect('ui:settings')
 
 
@@ -549,7 +575,7 @@ class UserUpdateView(RoleRequiredMixin, View):
             )
             messages.success(request, f'User {updated.username} updated.')
         else:
-            messages.error(request, f'Error updating user: {form.errors.as_text()}')
+            messages.error(request, 'Error updating user. Revisa los campos del formulario.')
         return redirect('ui:settings')
 
 

@@ -1,19 +1,24 @@
 {% extends 'ui/base_noc.html' %}
 {% block breadcrumbs %}Agents / {{ agent.hostname }}{% endblock %}
 {% block content %}
-<div x-data="{tab:'metrics'}" class="space-y-4">
-  <div class="console-card p-4 flex justify-between items-center">
-    <div>
-      <h1 class="text-xl font-semibold">{{ agent.hostname }}</h1>
-      <p class="text-sm text-slate-400">Server Health · uptime inferred by heartbeats · last heartbeat {{ agent.last_seen|date:'Y-m-d H:i:s' }}</p>
-    </div>
-    <div>
-      {% if agent.status == 'ONLINE' %}<span class="console-badge console-badge-ok">ONLINE</span>{% else %}<span class="console-badge console-badge-bad">OFFLINE</span>{% endif %}
-      <span class="console-badge" style="background:#1e293b">{{ agent.get_provider_display }}</span>
-    </div>
-  </div>
-
-  <div class="flex flex-wrap gap-2">{% for t in agent_tabs %}<button class="console-tab" :class="tab==='{{t}}' && 'active'" @click="tab='{{t}}'; htmx.ajax('GET','{% url 'agents:detail_tab' agent.id 'metrics' %}'.replace('metrics','{{t}}'),{target:'#tab-content'})">{{ t|title }}</button>{% endfor %}</div>
-  <div id="tab-content" class="console-card p-4" hx-get="{% url 'agents:detail_tab' agent.id 'metrics' %}" hx-trigger="load">Loading...</div>
+<div class="card buho-card mb-3"><div class="card-body d-flex justify-content-between"><div><h4>{{ agent.hostname }}</h4><small class="text-secondary">Last heartbeat {{ agent.last_seen|date:'Y-m-d H:i:s' }}</small></div><span class="badge {% if agent.status == 'ONLINE' %}text-bg-success{% else %}text-bg-danger{% endif %}">{{ agent.status }}</span></div></div>
+<ul class="nav nav-tabs"><li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#m">Metrics</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p">Processes</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#a">Apps</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#l">Logs</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#h">Health</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#n">Night Ops</button></li></ul>
+<div class="tab-content card buho-card border-top-0 p-3">
+<div class="tab-pane fade show active" id="m"><div class="row g-3 mb-3">{% for key,val in kpis.items %}<div class="col-md-2"><div class="card buho-card"><div class="card-body"><small class="text-secondary">{{ key|upper }}</small><div class="kpi-value">{% if val != None %}{{ val|floatformat:2 }}{% else %}--{% endif %}</div></div></div></div>{% endfor %}</div>{% if labels %}<div class="row"><div class="col-lg-6"><canvas id="agentCpuRam"></canvas></div><div class="col-lg-6"><canvas id="agentDiskNet"></canvas></div></div>{% else %}<div class="empty-state">Waiting for telemetry…</div>{% endif %}</div>
+<div class="tab-pane fade" id="p">{% if processes %}<table class="table table-sm" data-datatable="true"><thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>RAM</th></tr></thead><tbody>{% for p in processes %}<tr><td>{{p.pid}}</td><td>{{p.name}}</td><td>{{p.cpu}}</td><td>{{p.mem}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">No process samples.</div>{% endif %}</div>
+<div class="tab-pane fade" id="a">{% if apps %}<div class="row g-3">{% for app in apps %}<div class="col-md-4"><div class="card buho-card"><div class="card-body"><h6>{{app.name}}</h6><small class="text-secondary">{{app.runtime|default:'-'}} / {{app.framework|default:'-'}}</small></div></div></div>{% endfor %}</div>{% else %}<div class="empty-state">No apps detected.</div>{% endif %}</div>
+<div class="tab-pane fade" id="l">{% if logs %}<table class="table table-sm" data-datatable="true"><thead><tr><th>TS</th><th>Level</th><th>Message</th></tr></thead><tbody>{% for log in logs %}<tr><td>{{log.ts}}</td><td><span class="badge badge-sev-{{log.level}}">{{log.level}}</span></td><td>{{log.message|truncatechars:140}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">No logs.</div>{% endif %}</div>
+<div class="tab-pane fade" id="h"><p>Health score: {{ agent.health_score }}</p>{% if incidents %}<table class="table table-sm"><thead><tr><th>Type</th><th>Severity</th><th>Status</th></tr></thead><tbody>{% for i in incidents %}<tr><td>{{i.type}}</td><td>{{i.severity}}</td><td>{{i.status}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">No incidents.</div>{% endif %}</div>
+<div class="tab-pane fade" id="n"><form method="post" class="row g-2 mb-3">{% csrf_token %}<input type="hidden" name="action" value="run_night_scan"><div class="col-md-5"><textarea class="form-control" name="paths" rows="4">{% for p in agent_config.scan_paths %}{{ p }}
+{% endfor %}</textarea></div><div class="col-md-5"><textarea class="form-control" name="exclusions" rows="4">{% for p in agent_config.exclusions %}{{ p }}
+{% endfor %}</textarea></div><div class="col-md-2"><button class="btn btn-warning w-100">Run</button></div></form>{% if findings %}<table class="table table-sm"><thead><tr><th>Sev</th><th>Path</th><th>Status</th></tr></thead><tbody>{% for f in findings %}<tr><td><span class="badge badge-sev-{{f.severity}}">{{f.severity}}</span></td><td>{{f.file_path}}</td><td>{{f.status}}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state">Sin hallazgos.</div>{% endif %}</div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+if ({{ labels|length }} > 0) {
+new Chart(document.getElementById('agentCpuRam'),{type:'line',data:{labels:{{ labels|safe }},datasets:[{label:'CPU',data:{{ series.cpu|safe }},borderColor:'#60a5fa'},{label:'RAM',data:{{ series.ram|safe }},borderColor:'#34d399'}]}});
+new Chart(document.getElementById('agentDiskNet'),{type:'line',data:{labels:{{ labels|safe }},datasets:[{label:'Disk',data:{{ series.disk|safe }},borderColor:'#f59e0b'},{label:'Net Out',data:{{ series.net_out|safe }},borderColor:'#a855f7'}]}});
+}
+</script>
 {% endblock %}

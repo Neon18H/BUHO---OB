@@ -1,5 +1,5 @@
 {% extends 'ui/base_noc.html' %}
 {% block breadcrumbs %}SOC / Alerts{% endblock %}
 {% block content %}
-<table class="w-full text-sm console-card p-2"><thead><tr><th>Created</th><th>Severity</th><th>Title</th><th>Status</th></tr></thead><tbody>{% for a in alerts %}<tr><td>{{ a.created_at }}</td><td>{{ a.severity }}</td><td>{{ a.title }}</td><td>{{ a.status }}</td></tr>{% empty %}<tr><td colspan="4">No correlated alerts.</td></tr>{% endfor %}</tbody></table>
+<div class="card buho-card">{% if alerts %}<table class="table mb-0"><thead><tr><th>Created</th><th>Severity</th><th>Title</th><th>Status</th><th>Triage</th></tr></thead><tbody>{% for a in alerts %}<tr><td>{{ a.created_at }}</td><td><span class="badge badge-sev-{{a.severity}}">{{ a.severity }}</span></td><td>{{ a.title }}</td><td>{{ a.status }}</td><td><form method="post" class="d-flex gap-2">{% csrf_token %}<input type="hidden" name="alert_id" value="{{ a.id }}"><button class="btn btn-sm btn-outline-warning" name="action" value="ACK">ACK</button><button class="btn btn-sm btn-outline-success" name="action" value="RESOLVED">Resolve</button></form></td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state m-3">No correlated alerts.</div>{% endif %}</div>
 {% endblock %}

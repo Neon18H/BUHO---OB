@@ -1,50 +1,62 @@
 {% load static %}
 <!doctype html>
-<html lang="en" class="h-full">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}BUHO Console{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root { --bg:#0b1220; --panel:#111a2e; --border:#1f2a44; --accent:#22d3ee; }
-    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:#e2e8f0; }
-    .console-card{background:var(--panel); border:1px solid var(--border); border-radius:.75rem;}
-    .console-badge{display:inline-flex; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; font-weight:600}
-    .console-badge-ok{background:#0e7490;color:#cffafe}.console-badge-bad{background:#7f1d1d;color:#fee2e2}
-    .console-tab{padding:.45rem .8rem; border:1px solid var(--border); border-radius:.5rem; font-size:.875rem}
-    .console-tab.active{background:#0f766e; color:white; border-color:#0f766e}
-  </style>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+  <link href="{% static 'buho/css/theme.css' %}" rel="stylesheet">
 </head>
-<body class="h-full" x-data="{open:true}">
-<div class="min-h-full flex">
-  <aside class="console-card m-3 p-4 w-72" :class="open ? 'block' : 'hidden md:block md:w-20'">
-    <div class="flex items-center justify-between mb-4"><div><p class="font-bold">BUHO</p><p class="text-xs text-slate-400">Security Console</p></div><button @click="open=!open">☰</button></div>
-    <nav class="space-y-2 text-sm">
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:overview' %}">Dashboard</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:servers' %}">Servers</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:overview' %}">Agents</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:apps' %}">Apps</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:logs' %}">Logs</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:alerts' %}">Alerts</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'agents:threats_overview' %}">Threats (Night Ops)</a>
-      <a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'soc:overview' %}">SOC/SIEM</a>
-      {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}<a class="block px-3 py-2 rounded hover:bg-slate-800" href="{% url 'ui:settings' %}">Settings</a>{% endif %}
+<body class="buho-body">
+<div class="d-flex">
+  <aside class="buho-sidebar p-3 d-none d-lg-block">
+    <h5 class="mb-4">BUHO <small class="text-secondary d-block">Night Ops Console</small></h5>
+    <nav class="nav flex-column gap-1">
+      <a class="nav-link" href="{% url 'ui:overview' %}"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a>
+      <a class="nav-link" href="{% url 'ui:servers' %}"><i class="bi bi-hdd-network me-2"></i>Servers</a>
+      <a class="nav-link" href="{% url 'agents:overview' %}"><i class="bi bi-cpu me-2"></i>Agents</a>
+      <a class="nav-link" href="{% url 'ui:apps' %}"><i class="bi bi-grid me-2"></i>Apps</a>
+      <a class="nav-link" href="{% url 'ui:logs' %}"><i class="bi bi-journal-text me-2"></i>Logs</a>
+      <a class="nav-link" href="{% url 'ui:alerts' %}"><i class="bi bi-bell me-2"></i>Alerts</a>
+      <a class="nav-link" href="{% url 'agents:threats_overview' %}"><i class="bi bi-shield-exclamation me-2"></i>Threats</a>
+      <a class="nav-link" href="{% url 'soc:overview' %}"><i class="bi bi-diagram-3 me-2"></i>SOC/SIEM</a>
+      <a class="nav-link" href="{% url 'ui:settings_users' %}"><i class="bi bi-people me-2"></i>Users</a>
+      {% if request.user.role == 'SUPERADMIN' or request.user.role == 'ORG_ADMIN' %}
+      <a class="nav-link" href="{% url 'ui:settings' %}"><i class="bi bi-gear me-2"></i>Settings</a>
+      {% endif %}
     </nav>
   </aside>
-  <main class="flex-1 p-3">
-    <header class="console-card p-3 mb-4 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2"><input class="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm w-64" placeholder="Global search"></div>
-      <div class="text-sm flex gap-3 items-center">{% if active_org %}<span class="console-badge" style="background:#0e2a35;color:#67e8f9">{{ active_org.name }}</span>{% endif %}<span>{{ request.user.username }}</span><form method="POST" action="{% url 'logout' %}">{% csrf_token %}<button class="px-3 py-1 rounded bg-rose-700">Logout</button></form></div>
+
+  <div class="flex-grow-1 content-wrap">
+    <header class="topbar px-3 py-2 d-flex align-items-center justify-content-between gap-3 sticky-top">
+      <div class="input-group" style="max-width: 420px;"><span class="input-group-text bg-dark border-secondary"><i class="bi bi-search"></i></span><input class="form-control" placeholder="Search telemetry"></div>
+      <div class="d-flex align-items-center gap-3">
+        {% if active_org %}<span class="badge text-bg-primary">{{ active_org.name }}</span>{% endif %}
+        <span class="text-light small">{{ request.user.username }}</span>
+        <form method="POST" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-light">Logout</button></form>
+      </div>
     </header>
-    <div class="text-xs text-slate-400 mb-3">{% block breadcrumbs %}Home{% endblock %}</div>
-    {% if messages %}<div class="space-y-2 mb-3">{% for message in messages %}<div class="console-card p-2 text-sm">{{ message }}</div>{% endfor %}</div>{% endif %}
-    {% block content %}{% endblock %}
-  </main>
+
+    <main class="container-fluid p-3">
+      <div class="text-secondary small mb-2">{% block breadcrumbs %}Home{% endblock %}</div>
+      {% if messages %}
+      <div class="mb-3">
+        {% for message in messages %}<div class="alert alert-info py-2 mb-2">{{ message }}</div>{% endfor %}
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </div>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script src="{% static 'buho/js/app.js' %}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

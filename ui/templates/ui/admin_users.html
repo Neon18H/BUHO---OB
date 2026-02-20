@@ -1,65 +1,50 @@
 {% extends 'ui/base_noc.html' %}
-{% block breadcrumbs %}Admin / Usuarios{% endblock %}
+{% block breadcrumbs %}Settings / Users{% endblock %}
 {% block content %}
-<div class="glass p-4 mb-4">
-  <h1 class="text-xl mb-2">Usuarios</h1>
-  <p class="text-slate-400 text-sm">Gestiona usuarios de tu organización y sus roles.</p>
-</div>
-
-<div class="grid md:grid-cols-3 gap-4">
-  <section class="glass p-4 md:col-span-2">
-    <h2 class="text-lg mb-3">Usuarios de la organización</h2>
-    <table class="table-noc">
-      <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
-      <tbody>
-      {% for user in users %}
-        <tr>
-          <td>{{ user.username }}</td>
-          <td>{{ user.email|default:'-' }}</td>
-          <td>{{ user.get_role_display }}</td>
-          <td>
-            <span class="badge-noc {% if user.is_active %}badge-online{% else %}badge-offline{% endif %}">
-              {% if user.is_active %}ACTIVE{% else %}INACTIVE{% endif %}
-            </span>
-          </td>
-          <td>
-            {% if request.user.role != 'VIEWER' %}
-            <form method="post" action="{% url 'ui:user_update' user.id %}" class="space-y-2">
-              {% csrf_token %}
-              <select name="role" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
-                {% for value,label in user.Role.choices %}
-                  {% if value != 'SUPERADMIN' or request.user.role == 'SUPERADMIN' %}
-                  <option value="{{ value }}" {% if user.role == value %}selected{% endif %}>{{ label }}</option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-              <input type="email" name="email" value="{{ user.email }}" placeholder="email@org.com" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
-              <label class="text-xs"><input type="checkbox" name="is_active" {% if user.is_active %}checked{% endif %}> Activo</label>
-              <button class="btn-noc btn-secondary-noc">Guardar</button>
-            </form>
-            {% if user.id != request.user.id and user.is_active %}
-            <div class="flex gap-2 mt-2">
-              <form method="post" action="{% url 'ui:user_reset_password' user.id %}">{% csrf_token %}<button class="btn-noc">Reset password</button></form>
-              <form method="post" action="{% url 'ui:user_deactivate' user.id %}">{% csrf_token %}<button class="btn-noc btn-danger-noc">Desactivar</button></form>
-            </div>
-            {% endif %}
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="5">Waiting for agent telemetry</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </section>
-
-  <section class="glass p-4">
-    <h2 class="text-lg mb-3">Crear usuario</h2>
-    <form method="post" action="{% url 'ui:user_create' %}" class="space-y-3">
-      {% csrf_token %}
-      {{ create_form.as_p }}
-      <button class="btn-noc btn-primary-noc">Crear usuario</button>
-    </form>
-  </section>
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card buho-card">
+      <div class="card-header"><strong>Usuarios de la organización</strong></div>
+      <div class="card-body p-0">
+        {% if users %}
+        <table class="table table-hover mb-0" data-datatable="true">
+          <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Acciones</th></tr></thead>
+          <tbody>
+          {% for user in users %}
+            <tr>
+              <td>{{ user.username }}</td><td>{{ user.email|default:'-' }}</td><td>{{ user.get_role_display }}</td>
+              <td><span class="badge {% if user.is_active %}text-bg-success{% else %}text-bg-secondary{% endif %}">{% if user.is_active %}ACTIVE{% else %}INACTIVE{% endif %}</span></td>
+              <td>
+                <form method="post" action="{% url 'ui:user_update' user.id %}" class="row g-1 align-items-center">{% csrf_token %}
+                  <div class="col-md-4"><select name="role" class="form-select form-select-sm">{% for value,label in user.Role.choices %}{% if value != 'SUPERADMIN' or request.user.role == 'SUPERADMIN' %}<option value="{{value}}" {% if user.role == value %}selected{% endif %}>{{label}}</option>{% endif %}{% endfor %}</select></div>
+                  <div class="col-md-4"><input type="email" name="email" value="{{ user.email }}" class="form-control form-control-sm"></div>
+                  <div class="col-md-2 form-check"><input class="form-check-input" type="checkbox" name="is_active" {% if user.is_active %}checked{% endif %}></div>
+                  <div class="col-md-2"><button class="btn btn-sm btn-outline-primary">Guardar</button></div>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}<div class="empty-state m-3">No hay usuarios para esta organización.</div>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card buho-card">
+      <div class="card-header"><strong>Crear usuario</strong></div>
+      <div class="card-body">
+        <form method="post" action="{% url 'ui:user_create' %}" class="row g-2">{% csrf_token %}
+          <div class="col-md-6"><label class="form-label">Username</label>{{ create_form.username }}</div>
+          <div class="col-md-6"><label class="form-label">Email</label>{{ create_form.email }}</div>
+          <div class="col-md-6"><label class="form-label">Role</label>{{ create_form.role }}</div>
+          <div class="col-md-6"><label class="form-label">Password</label>{{ create_form.password1 }}</div>
+          <div class="col-md-6"><label class="form-label">Confirm Password</label>{{ create_form.password2 }}</div>
+          {% if create_form.errors %}<div class="col-12"><small class="text-warning">{% for field,errors in create_form.errors.items %}{{ field }}: {{ errors|join:', ' }} {% endfor %}</small></div>{% endif %}
+          <div class="col-12"><button class="btn btn-primary w-100">Crear usuario</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

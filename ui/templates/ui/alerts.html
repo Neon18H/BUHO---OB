@@ -1,10 +1,11 @@
 {% extends 'ui/base_noc.html' %}
 {% block breadcrumbs %}Alerts{% endblock %}
 {% block content %}
-<div class="glass p-4">
-  <h1 class="text-xl mb-4">Alerts & severity</h1>
-  <table class="table-noc"><thead><tr><th>Type</th><th>Severity</th><th>Status</th><th>Agent</th><th>Last seen</th></tr></thead><tbody>
-    {% for alert in alerts %}<tr><td>{{ alert.get_type_display }}</td><td><span class="badge-noc {% if alert.severity == 'CRITICAL' %}badge-sev1{% elif alert.severity == 'HIGH' %}badge-sev2{% else %}badge-sev3{% endif %}">{{ alert.severity }}</span></td><td>{{ alert.status }}</td><td>{{ alert.agent.name|default:'-' }}</td><td>{{ alert.last_seen|date:'Y-m-d H:i' }}</td></tr>{% empty %}<tr><td colspan="5">No alerts yet · rules coming</td></tr>{% endfor %}
-  </tbody></table>
-</div>
+<div class="card buho-card"><div class="card-header d-flex justify-content-between"><strong>Alert Queue</strong><span class="text-secondary">OPEN / ACK / RESOLVED</span></div><div class="card-body p-0">
+{% if alerts %}
+<table class="table table-hover mb-0" data-datatable="true"><thead><tr><th>Type</th><th>Severity</th><th>Status</th><th>Agent</th><th>Last seen</th></tr></thead><tbody>
+{% for alert in alerts %}<tr><td>{{ alert.get_type_display }}</td><td><span class="badge badge-sev-{{ alert.severity }}">{{ alert.severity }}</span></td><td>{{ alert.status }}</td><td>{{ alert.agent.name|default:'-' }}</td><td>{{ alert.last_seen|date:'Y-m-d H:i' }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<div class="empty-state m-3">No alerts yet. Install agents and wait for telemetry.</div>{% endif %}
+</div></div>
 {% endblock %}
